@@ -35,6 +35,7 @@ Key references:
 - [`docs/launch/PORTLAND_ALPHA_LAUNCH_PLAYBOOK.md`](docs/launch/PORTLAND_ALPHA_LAUNCH_PLAYBOOK.md) — canonical launch verdict, founder-control rules, funding order, expense preparation, and next actions.
 - [`docs/decisions/0001-portland-web-alpha-before-native.md`](docs/decisions/0001-portland-web-alpha-before-native.md) — accepted staged-launch decision.
 - [`docs/testing/ab-testing-codex-handoff.md`](docs/testing/ab-testing-codex-handoff.md) — current ChatGPT/Codex-ready A/B and dogfood brief.
+- [`docs/testing/reports/2026-07-17-live-variant-a-baseline.md`](docs/testing/reports/2026-07-17-live-variant-a-baseline.md) — initial deployed landing-page A/B baseline.
 - [`docs/testing/reports/2026-07-17-technical-verification.md`](docs/testing/reports/2026-07-17-technical-verification.md) — evidence behind the controlled-alpha readiness verdict.
 
 ## Deployment
