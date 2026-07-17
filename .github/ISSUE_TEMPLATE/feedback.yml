@@ -1,0 +1,33 @@
+name: Portland alpha feedback
+description: Share usability feedback without private date or location details.
+title: "[Alpha feedback] "
+labels: [feedback]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include names, street addresses, phone numbers, or screenshots containing private information.
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - iPhone / Safari
+        - Android / Chrome
+        - Desktop / Chrome
+        - Desktop / Safari
+        - Desktop / Edge or Firefox
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: What happened?
+      placeholder: Describe the step, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: trust
+    attributes:
+      label: What would make the plan more useful or trustworthy?
+    validations:
+      required: false

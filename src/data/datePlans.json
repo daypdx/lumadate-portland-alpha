@@ -1,0 +1,607 @@
+[
+  {
+    "id": "jazz-sushi-bookstore-evening",
+    "title": "Jazz, Sushi, and Quiet Bookstore Finish",
+    "shortPitch": "Built for someone who likes jazz, sushi, bookstores, and quiet places.",
+    "neighborhoods": [
+      "NW Portland",
+      "Pearl District"
+    ],
+    "city": "Portland, OR",
+    "estimatedCostTotal": 115,
+    "estimatedCostLevel": 3,
+    "estimatedDurationMinutes": 240,
+    "bookingType": "reservation",
+    "tags": [
+      "jazz",
+      "sushi",
+      "bookstore",
+      "quiet",
+      "romantic",
+      "rain safe",
+      "first-date safe"
+    ],
+    "interestKeywords": [
+      "jazz",
+      "sushi",
+      "books",
+      "bookstore",
+      "quiet",
+      "music"
+    ],
+    "safetyProfile": {
+      "publicPlace": true,
+      "goodForFirstDate": true,
+      "alcoholCentric": false,
+      "indoor": true,
+      "outdoor": false
+    },
+    "itinerary": [
+      {
+        "timeOffsetMinutes": 0,
+        "title": "Meet at a public landmark near dinner",
+        "description": "Neutral, easy-to-find meeting point. Exact private origins are not shared.",
+        "canReplace": false
+      },
+      {
+        "timeOffsetMinutes": 15,
+        "title": "Sushi dinner",
+        "description": "Reservation recommended. Keep the table time flexible if possible.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 105,
+        "title": "Jazz set",
+        "description": "Shared music gives the date an anchor without forcing constant conversation.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 210,
+        "title": "Optional bookstore or quiet dessert",
+        "description": "Low-pressure extension if the night is going well.",
+        "canReplace": true
+      }
+    ],
+    "backupOptions": [
+      "quiet cafe",
+      "dessert bar",
+      "walkable bookstore",
+      "mocktail lounge"
+    ],
+    "providers": [
+      {
+        "type": "opentable",
+        "label": "Open reservation provider",
+        "url": "https://www.opentable.com/portland-restaurants",
+        "mode": "external_link"
+      },
+      {
+        "type": "google_maps",
+        "label": "Open Google Maps results / reviews",
+        "url": "https://maps.google.com/?q=jazz+Portland+OR",
+        "mode": "external_link"
+      },
+      {
+        "type": "mock",
+        "label": "Mock reservation",
+        "mode": "mock_reservation"
+      }
+    ],
+    "safetyNotes": [
+      "Public indoor venues",
+      "Neutral meet area",
+      "Quiet backup available"
+    ],
+    "places": [
+      {
+        "name": "Bamboo Sushi NW",
+        "category": "Sushi dinner",
+        "neighborhood": "NW Portland",
+        "priceLevel": "$$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Bamboo%20Sushi%20NW%20NW%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Bamboo%20Sushi%20NW%20NW%20Portland%20Oregon%20reviews",
+        "why": "Real sushi anchor that fits the entered sushi cue and works before a longer night.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Jack London Revue",
+        "category": "Jazz club",
+        "neighborhood": "Downtown Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Jack%20London%20Revue%20Downtown%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Jack%20London%20Revue%20Downtown%20Portland%20Oregon%20reviews",
+        "why": "Actual Portland jazz venue option for the music portion of the itinerary.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Powell's City of Books",
+        "category": "Bookstore finish",
+        "neighborhood": "Pearl District Portland",
+        "priceLevel": "$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Powell%27s%20City%20of%20Books%20Pearl%20District%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Powell%27s%20City%20of%20Books%20Pearl%20District%20Portland%20Oregon%20reviews",
+        "why": "Iconic public bookstore finish for a quieter, low-pressure extension.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      }
+    ]
+  },
+  {
+    "id": "coffee-art-low-pressure",
+    "title": "Coffee, Art Walk, and Flexible Dessert",
+    "shortPitch": "Low-pressure and public, good when you want conversation without a long commitment.",
+    "neighborhoods": [
+      "Pearl District",
+      "NW Portland"
+    ],
+    "city": "Portland, OR",
+    "estimatedCostTotal": 35,
+    "estimatedCostLevel": 1,
+    "estimatedDurationMinutes": 120,
+    "bookingType": "walk_in",
+    "tags": [
+      "coffee",
+      "art",
+      "quiet",
+      "low pressure",
+      "rain safe",
+      "first-date safe"
+    ],
+    "interestKeywords": [
+      "coffee",
+      "art",
+      "gallery",
+      "quiet",
+      "dessert",
+      "walk"
+    ],
+    "safetyProfile": {
+      "publicPlace": true,
+      "goodForFirstDate": true,
+      "alcoholCentric": false,
+      "indoor": true,
+      "outdoor": false
+    },
+    "itinerary": [
+      {
+        "timeOffsetMinutes": 0,
+        "title": "Meet for coffee",
+        "description": "Start somewhere public and casual.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 45,
+        "title": "Nearby art/gallery walk",
+        "description": "Movement keeps it from feeling like an interview.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 105,
+        "title": "Optional dessert",
+        "description": "Extend only if both people want to.",
+        "canReplace": true
+      }
+    ],
+    "backupOptions": [
+      "bookstore",
+      "tea shop",
+      "museum lobby",
+      "dessert cafe"
+    ],
+    "providers": [
+      {
+        "type": "google_maps",
+        "label": "Open Google Maps results / reviews",
+        "url": "https://maps.google.com/?q=coffee+art+Pearl+District+Portland",
+        "mode": "external_link"
+      }
+    ],
+    "safetyNotes": [
+      "Public",
+      "Easy exit",
+      "No alcohol required"
+    ],
+    "places": [
+      {
+        "name": "Barista Pearl District",
+        "category": "Coffee",
+        "neighborhood": "Pearl District Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Barista%20Pearl%20District%20Pearl%20District%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Barista%20Pearl%20District%20Pearl%20District%20Portland%20Oregon%20reviews",
+        "why": "Real coffee stop that supports a short, conversation-first date.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Portland Art Museum",
+        "category": "Art walk / museum",
+        "neighborhood": "Downtown Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Portland%20Art%20Museum%20Downtown%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Portland%20Art%20Museum%20Downtown%20Portland%20Oregon%20reviews",
+        "why": "Recognizable public art anchor with a clear Google Maps handoff.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Pix Patisserie",
+        "category": "Dessert",
+        "neighborhood": "Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Pix%20Patisserie%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Pix%20Patisserie%20Portland%20Oregon%20reviews",
+        "why": "Dessert backup/extension when the date is going well.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      }
+    ]
+  },
+  {
+    "id": "portland-park-restaurant-walk",
+    "title": "Laurelhurst Park Walk and Portland Dinner",
+    "shortPitch": "A functional Portland plan with a public park meet point, nearby dinner, and an easy dessert backup.",
+    "neighborhoods": [
+      "SE Portland",
+      "Laurelhurst",
+      "Kerns"
+    ],
+    "city": "Portland, OR",
+    "estimatedCostTotal": 70,
+    "estimatedCostLevel": 2,
+    "estimatedDurationMinutes": 135,
+    "bookingType": "walk_in",
+    "tags": [
+      "park",
+      "restaurant",
+      "outdoors",
+      "dinner",
+      "walkable",
+      "first-date safe",
+      "low pressure"
+    ],
+    "interestKeywords": [
+      "park",
+      "parks",
+      "restaurant",
+      "restaurants",
+      "dinner",
+      "walk",
+      "outdoors",
+      "coffee",
+      "dessert",
+      "quiet"
+    ],
+    "safetyProfile": {
+      "publicPlace": true,
+      "goodForFirstDate": true,
+      "alcoholCentric": false,
+      "indoor": false,
+      "outdoor": true
+    },
+    "itinerary": [
+      {
+        "timeOffsetMinutes": 0,
+        "title": "Meet at Laurelhurst Park public entrance",
+        "description": "Start at a visible public park meet point. Private origins stay out of the shared plan.",
+        "canReplace": false
+      },
+      {
+        "timeOffsetMinutes": 15,
+        "title": "Walk the Laurelhurst Park loop",
+        "description": "A relaxed public walk gives the date movement and easy conversation before food.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 60,
+        "title": "Dinner nearby in SE Portland",
+        "description": "Pick a real nearby restaurant and verify current hours or wait time before leaving the park.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 115,
+        "title": "Optional coffee or dessert extension",
+        "description": "Keep the night flexible with a short public cafe/dessert backup if the date is going well.",
+        "canReplace": true
+      }
+    ],
+    "backupOptions": [
+      "indoor coffee shop",
+      "dessert cafe",
+      "nearby bookstore",
+      "shorter park loop"
+    ],
+    "providers": [
+      {
+        "type": "google_maps",
+        "label": "Open map: park + dinner area",
+        "url": "https://www.google.com/maps/search/?api=1&query=Laurelhurst%20Park%20restaurants%20Portland%20Oregon",
+        "mode": "external_link"
+      },
+      {
+        "type": "opentable",
+        "label": "Check reservation provider",
+        "url": "https://www.opentable.com/portland-restaurants",
+        "mode": "external_link"
+      }
+    ],
+    "safetyNotes": [
+      "Public park meet point",
+      "Walkable restaurant backup",
+      "Verify hours and lighting before leaving"
+    ],
+    "places": [
+      {
+        "name": "Laurelhurst Park",
+        "category": "Public park walk",
+        "neighborhood": "SE Portland",
+        "priceLevel": "Free",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify hours, photos, and current park conditions.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Laurelhurst%20Park%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Laurelhurst%20Park%20Portland%20Oregon%20reviews",
+        "why": "Recognizable Portland park anchor for a public, low-pressure walk before dinner.",
+        "warning": "Use daytime/early evening judgment and verify lighting/weather before choosing a park walk."
+      },
+      {
+        "name": "Laurelhurst Market",
+        "category": "Dinner nearby",
+        "neighborhood": "Kerns / Laurelhurst Portland",
+        "priceLevel": "$$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, hours, wait time, and reservation options.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Laurelhurst%20Market%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Laurelhurst%20Market%20Portland%20Oregon%20reviews",
+        "why": "Specific Portland restaurant search target close enough to make the park-to-dinner plan feel real.",
+        "warning": "Verify current hours and reservation/wait-time availability before presenting it as the dinner anchor."
+      },
+      {
+        "name": "Rimsky-Korsakoffee House",
+        "category": "Dessert / coffee backup",
+        "neighborhood": "SE Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, hours, wait time, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Rimsky-Korsakoffee%20House%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Rimsky-Korsakoffee%20House%20Portland%20Oregon%20reviews",
+        "why": "Memorable Portland dessert/coffee extension if dinner or the walk ends early.",
+        "warning": "Verify hours before suggesting it as a same-night backup."
+      }
+    ]
+  },
+  {
+    "id": "pottery-class-coffee",
+    "title": "Pottery Class and Coffee After",
+    "shortPitch": "Creative hands-on plan for someone who likes art, learning, or playful activities.",
+    "neighborhoods": [
+      "Portland Metro"
+    ],
+    "city": "Portland, OR",
+    "estimatedCostTotal": 150,
+    "estimatedCostLevel": 4,
+    "estimatedDurationMinutes": 180,
+    "bookingType": "reservation",
+    "tags": [
+      "art",
+      "creative",
+      "class",
+      "rain safe",
+      "reservation",
+      "special"
+    ],
+    "interestKeywords": [
+      "art",
+      "pottery",
+      "creative",
+      "class",
+      "workshop",
+      "coffee"
+    ],
+    "safetyProfile": {
+      "publicPlace": true,
+      "goodForFirstDate": true,
+      "alcoholCentric": false,
+      "indoor": true,
+      "outdoor": false
+    },
+    "itinerary": [
+      {
+        "timeOffsetMinutes": 0,
+        "title": "Meet at studio",
+        "description": "Arrive 10 minutes early for check-in.",
+        "canReplace": false
+      },
+      {
+        "timeOffsetMinutes": 15,
+        "title": "Pottery class",
+        "description": "Activity carries the date and reduces awkward silence.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 135,
+        "title": "Coffee afterward",
+        "description": "Optional debrief after the class.",
+        "canReplace": true
+      }
+    ],
+    "backupOptions": [
+      "paint night",
+      "museum",
+      "craft market",
+      "coffee and sketching"
+    ],
+    "providers": [
+      {
+        "type": "google_maps",
+        "label": "Open Google Maps results / reviews",
+        "url": "https://maps.google.com/?q=pottery+class+Portland+OR",
+        "mode": "external_link"
+      },
+      {
+        "type": "mock",
+        "label": "Mock reservation",
+        "mode": "mock_reservation"
+      }
+    ],
+    "safetyNotes": [
+      "Public class",
+      "Requires booking",
+      "Check cancellation policy"
+    ],
+    "places": [
+      {
+        "name": "Radius Art Studio",
+        "category": "Creative class search anchor",
+        "neighborhood": "Portland",
+        "priceLevel": "$$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Radius%20Art%20Studio%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Radius%20Art%20Studio%20Portland%20Oregon%20reviews",
+        "why": "Real arts/studio-style search anchor for classes; confirm event availability.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Portland Pottery",
+        "category": "Pottery class search anchor",
+        "neighborhood": "Portland",
+        "priceLevel": "$$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Portland%20Pottery%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Portland%20Pottery%20Portland%20Oregon%20reviews",
+        "why": "Specific pottery-class search option for Codex/API integration to validate.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Good Coffee",
+        "category": "Coffee after",
+        "neighborhood": "Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Good%20Coffee%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Good%20Coffee%20Portland%20Oregon%20reviews",
+        "why": "Simple public coffee handoff after a class.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      }
+    ]
+  },
+  {
+    "id": "comedy-mocktails",
+    "title": "Comedy Night and Mocktails",
+    "shortPitch": "Fun, social, and still works for someone avoiding alcohol.",
+    "neighborhoods": [
+      "Portland"
+    ],
+    "city": "Portland, OR",
+    "estimatedCostTotal": 85,
+    "estimatedCostLevel": 2,
+    "estimatedDurationMinutes": 170,
+    "bookingType": "ticketed",
+    "tags": [
+      "comedy",
+      "mocktails",
+      "rain safe",
+      "tickets",
+      "social",
+      "no alcohol option"
+    ],
+    "interestKeywords": [
+      "comedy",
+      "mocktail",
+      "funny",
+      "show",
+      "night",
+      "sober"
+    ],
+    "safetyProfile": {
+      "publicPlace": true,
+      "goodForFirstDate": true,
+      "alcoholCentric": false,
+      "indoor": true,
+      "outdoor": false
+    },
+    "itinerary": [
+      {
+        "timeOffsetMinutes": 0,
+        "title": "Mocktails or snacks",
+        "description": "Start before the show without making alcohol required.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 45,
+        "title": "Comedy show",
+        "description": "Shared entertainment creates easy conversation later.",
+        "canReplace": true
+      },
+      {
+        "timeOffsetMinutes": 135,
+        "title": "Post-show walk or dessert",
+        "description": "Optional extension if it goes well.",
+        "canReplace": true
+      }
+    ],
+    "backupOptions": [
+      "coffee",
+      "dessert",
+      "arcade",
+      "quiet bar with NA options"
+    ],
+    "providers": [
+      {
+        "type": "google_maps",
+        "label": "Open Google Maps results / reviews",
+        "url": "https://www.google.com/maps/search/?api=1&query=Helium%20Comedy%20Club%20Portland%20Portland%20Oregon",
+        "mode": "external_link"
+      },
+      {
+        "type": "ticketmaster",
+        "label": "Search comedy tickets",
+        "url": "https://www.ticketmaster.com/search?q=comedy%20Portland",
+        "mode": "external_link"
+      },
+      {
+        "type": "mock",
+        "label": "Mock ticket hold",
+        "mode": "mock_checkout"
+      }
+    ],
+    "safetyNotes": [
+      "Public venue",
+      "Non-alcohol option",
+      "Confirm show time"
+    ],
+    "places": [
+      {
+        "name": "Helium Comedy Club Portland",
+        "category": "Comedy show",
+        "neighborhood": "Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Helium%20Comedy%20Club%20Portland%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Helium%20Comedy%20Club%20Portland%20Portland%20Oregon%20reviews",
+        "why": "Actual comedy venue search target for ticket/date-night plans.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "The Sports Bra",
+        "category": "Food and NA drink option",
+        "neighborhood": "Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=The%20Sports%20Bra%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=The%20Sports%20Bra%20Portland%20Oregon%20reviews",
+        "why": "Public food/drink stop with non-alcohol-friendly positioning to verify in maps.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      },
+      {
+        "name": "Rimsky-Korsakoffee House",
+        "category": "Late dessert / coffee",
+        "neighborhood": "Portland",
+        "priceLevel": "$$",
+        "ratingSummary": "Live Google Maps reviews required — tap to verify rating, review count, hours, and photos.",
+        "mapsLink": "https://www.google.com/maps/search/?api=1&query=Rimsky-Korsakoffee%20House%20Portland%20Oregon",
+        "reviewLink": "https://www.google.com/maps/search/?api=1&query=Rimsky-Korsakoffee%20House%20Portland%20Oregon%20reviews",
+        "why": "Memorable late coffee/dessert backup if the show ends early.",
+        "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
+      }
+    ]
+  }
+]
