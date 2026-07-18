@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import plansJson from './data/datePlans.json'
+import { recommendablePortlandVenues, type CuratedVenueKind } from './data/portlandVenues'
 import lumaDateEmblem from './assets/lumadate-emblem.png'
+import {
+  findAreaPairing,
+  findVenueBackup,
+  recommendCuratedVenues,
+  type CuratedVenueMatch,
+} from './lib/curatedVenueRecommendations'
 import { buildMockStopSignals, mockWeatherAtArrival } from './lib/mockItinerarySignals'
 import './App.css'
 
@@ -124,6 +131,8 @@ type SavedItinerary = {
   planId: string
   title: string
   meetArea: string
+  venueId?: string
+  venueName?: string
   savedAt: string
 }
 
@@ -424,6 +433,14 @@ function formatDuration(minutes: number): string {
   return leftover ? `${hours} hr ${leftover} min` : `${hours} hr`
 }
 
+function preferredVenueKinds(plan: DatePlan): CuratedVenueKind[] {
+  const planTerms = [...plan.tags, ...plan.interestKeywords].map((term) => term.toLowerCase())
+  const isCoffeePlan = planTerms.some((term) => /coffee|cafe|dessert/.test(term))
+    && !planTerms.some((term) => /dinner|restaurant|sushi/.test(term))
+
+  return isCoffeePlan ? ['cafe', 'dessert'] : ['restaurant']
+}
+
 function cleanLabel(value: string): string {
   return value.replace('_', ' ')
 }
@@ -697,10 +714,35 @@ function App() {
     parseStored(storageKeys.reminders, defaultReminders),
   )
   const [saved, setSaved] = useState<SavedItinerary[]>(() => parseStored(storageKeys.saved, []))
+  const [selectedVenueId, setSelectedVenueId] = useState('')
 
   const rankedPlans = useMemo(() => rankPlans(intake), [intake])
   const active = rankedPlans.find((item) => item.plan.id === activeId) ?? rankedPlans[0]
-  const isActiveSaved = saved.some((item) => item.planId === active.plan.id)
+  const venueSuggestions = useMemo(() => {
+    const preferredKinds = preferredVenueKinds(active.plan)
+    const matches = recommendCuratedVenues({
+      area: intake.dateArea,
+      categories: [...intake.activityTypes, ...intake.moodTypes, ...active.plan.tags, ...active.plan.interestKeywords],
+      budgetMax: intake.budgetMax,
+      cues: [
+        intake.cuisineLikes,
+        intake.dietaryLimits,
+        intake.alcoholPreference === 'alcohol_ok' ? '' : 'easy without alcohol',
+        intake.dateEnjoysText,
+        intake.userEnjoysText,
+      ].join(' '),
+      avoidCues: intake.mustAvoid,
+    }, recommendablePortlandVenues.length)
+    const preferred = matches.filter(({ venue }) => preferredKinds.includes(venue.kind))
+    const remaining = matches.filter(({ venue }) => !preferredKinds.includes(venue.kind))
+
+    return [...preferred, ...remaining].slice(0, 4)
+  }, [active.plan, intake])
+  const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueId)
+    ?? venueSuggestions[0]
+  const isActiveSaved = saved.some((item) => (
+    item.planId === active.plan.id && (item.venueId ?? '') === (selectedVenueMatch?.venue.id ?? '')
+  ))
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -719,6 +761,11 @@ function App() {
       setActiveId(rankedPlans[0].plan.id)
     }
   }, [activeId, rankedPlans])
+
+  useEffect(() => {
+    const nextVenueId = selectedVenueMatch?.venue.id ?? ''
+    if (nextVenueId !== selectedVenueId) setSelectedVenueId(nextVenueId)
+  }, [selectedVenueId, selectedVenueMatch])
 
   function updateIntake<K extends keyof Intake>(key: K, value: Intake[K]) {
     setIntake((current) => ({ ...current, [key]: value }))
@@ -792,6 +839,8 @@ function App() {
       planId: active.plan.id,
       title: active.plan.title,
       meetArea: active.meetArea,
+      venueId: selectedVenueMatch?.venue.id,
+      venueName: selectedVenueMatch?.venue.name,
       savedAt: new Date().toISOString(),
     }
     setSaved((current) => [record, ...current.filter((item) => item.planId !== active.plan.id)])
@@ -817,6 +866,7 @@ function App() {
     setSheet(null)
     setIntake(createExampleIntake())
     setExperienceMode('demo')
+    setSelectedVenueId('')
     setStarted(true)
     setTab('options')
     showToast('Clearly labeled example loaded.')
@@ -829,6 +879,7 @@ function App() {
     localStorage.removeItem(storageKeys.reminders)
     setIntake(createDefaultIntake())
     setExperienceMode('personal')
+    setSelectedVenueId('')
     setSaved([])
     setReminders(defaultReminders)
     showToast('Planning data cleared')
@@ -879,6 +930,7 @@ function App() {
               setSheet(null)
               setIntake(createDefaultIntake())
               setExperienceMode('personal')
+              setSelectedVenueId('')
               setStarted(true)
               setTab('plan')
               showToast('Planning flow opened.')
@@ -944,6 +996,10 @@ function App() {
               onConfirm={confirmPlan}
               onSave={saveActive}
               isSaved={isActiveSaved}
+              venueSuggestions={venueSuggestions}
+              planningArea={intake.dateArea}
+              selectedVenueId={selectedVenueMatch?.venue.id ?? ''}
+              onSelectVenue={setSelectedVenueId}
             />
           )}
 
@@ -968,6 +1024,7 @@ function App() {
               adjustmentMessage={adjustmentMessage}
               copied={copied}
               onCopy={copyText}
+              selectedVenue={selectedVenueMatch}
             />
           )}
 
@@ -1065,8 +1122,9 @@ function App() {
       {sheet === 'saved' && (
         <SavedSheet
           saved={saved}
-          onOpen={(planId) => {
-            setActiveId(planId)
+          onOpen={(item) => {
+            setActiveId(item.planId)
+            setSelectedVenueId(item.venueId ?? '')
             setTab('itinerary')
             setSheet(null)
           }}
@@ -1822,6 +1880,10 @@ function ResultsPanel({
   onConfirm,
   onSave,
   isSaved,
+  venueSuggestions,
+  planningArea,
+  selectedVenueId,
+  onSelectVenue,
 }: {
   rankedPlans: RankedPlan[]
   activeId: string
@@ -1829,6 +1891,10 @@ function ResultsPanel({
   onConfirm: () => void
   onSave: () => void
   isSaved: boolean
+  venueSuggestions: CuratedVenueMatch[]
+  planningArea: string
+  selectedVenueId: string
+  onSelectVenue: (id: string) => void
 }) {
   const active = rankedPlans.find((ranked) => ranked.plan.id === activeId) ?? rankedPlans[0]
 
@@ -1861,6 +1927,12 @@ function ResultsPanel({
           </button>
         ))}
       </div>
+      <CuratedVenuePanel
+        matches={venueSuggestions}
+        planningArea={planningArea}
+        selectedVenueId={selectedVenueId}
+        onSelect={onSelectVenue}
+      />
       <div className="confirm-plan-bar">
         <div>
           <strong>{active?.plan.title}</strong>
@@ -1874,6 +1946,146 @@ function ResultsPanel({
             Open selected itinerary
           </button>
         </div>
+      </div>
+    </section>
+  )
+}
+
+function CuratedVenuePanel({
+  matches,
+  planningArea,
+  selectedVenueId,
+  onSelect,
+}: {
+  matches: CuratedVenueMatch[]
+  planningArea: string
+  selectedVenueId: string
+  onSelect: (id: string) => void
+}) {
+  const hasSameAreaMatch = matches.some(({ venue }) => venue.area === planningArea)
+
+  return (
+    <section className="curated-venue-panel" aria-labelledby="curated-venue-title">
+      <div className="section-heading compact-heading">
+        <span className="eyebrow">Curated Portland venue pool</span>
+        <h3 id="curated-venue-title">Real restaurant and café ideas for this brief.</h3>
+        <p className="curation-disclaimer">
+          <strong>Static curation only.</strong> Ranked from {recommendablePortlandVenues.length} researched Portland seeds.
+          Hours, menus, prices, and availability are not live.
+        </p>
+        {!hasSameAreaMatch && (
+          <p className="venue-coverage-note">
+            No same-area seed is available for {planningArea} yet. Showing broader Portland matches.
+          </p>
+        )}
+      </div>
+      {matches.length ? (
+        <div className="curated-venue-grid">
+          {matches.map((match) => (
+            <CuratedVenueCard
+              key={match.venue.id}
+              match={match}
+              selected={match.venue.id === selectedVenueId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="empty">No curated venue fits every avoid rule. Edit the brief to see safe alternatives.</p>
+      )}
+    </section>
+  )
+}
+
+function CuratedVenueCard({
+  match: { venue, reason },
+  selected,
+  onSelect,
+}: {
+  match: CuratedVenueMatch
+  selected: boolean
+  onSelect: (id: string) => void
+}) {
+  const backup = findVenueBackup(venue)
+  const pairing = findAreaPairing(venue)
+  const evidenceUrl = venue.sourceUrls.find((url) => url !== venue.websiteUrl)
+  const specialCaution = venue.verificationCaution
+    && !venue.verificationCaution.startsWith('Curated static record.')
+
+  return (
+    <article className={selected ? 'curated-venue-card selected' : 'curated-venue-card'}>
+      <div>
+        <span className="venue-kind">
+          {venue.kind} · {venue.curationTier === 'editorial-consensus'
+            ? 'multi-list consensus'
+            : venue.curationTier === 'founder-seed' ? 'founder seed' : 'current guide'}
+        </span>
+        <strong>{venue.name}</strong>
+        <small>{venue.neighborhood} · {'$'.repeat(venue.priceTierEstimate)} editorial estimate</small>
+      </div>
+      <p>{venue.summary}</p>
+      <span className="venue-match-reason">{reason}</span>
+      {specialCaution && <p className="venue-specific-caution">{specialCaution}</p>}
+      <div className="venue-flex-options">
+        {backup && <small><strong>Backup:</strong> {backup.name}</small>}
+        {pairing && (
+          <small>
+            <strong>Pair with:</strong>{' '}
+            <a href={pairing.mapsUrl} target="_blank" rel="noreferrer">{pairing.name}</a>
+          </small>
+        )}
+      </div>
+      <small>Researched {venue.verifiedAt}. Verify directly before leaving.</small>
+      <details className="venue-evidence">
+        <summary>Why this evidence tier</summary>
+        <p>{venue.popularityBasis}</p>
+        {evidenceUrl && <a href={evidenceUrl} target="_blank" rel="noreferrer">Open supporting source</a>}
+      </details>
+      <div className="place-actions">
+        <button
+          type="button"
+          className={selected ? 'secondary' : 'primary'}
+          aria-pressed={selected}
+          onClick={() => onSelect(venue.id)}
+        >
+          {selected ? 'Selected venue' : 'Use this venue'}
+        </button>
+        <a className="link-button" href={venue.mapsUrl} target="_blank" rel="noreferrer">
+          Open map
+        </a>
+        {venue.websiteUrl && (
+          <a className="ghost link-button" href={venue.websiteUrl} target="_blank" rel="noreferrer">
+            Official site
+          </a>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function CuratedItineraryFlex({ match }: { match?: CuratedVenueMatch }) {
+  if (!match) return null
+
+  const { venue, reason } = match
+  const backup = findVenueBackup(venue)
+  const pairing = findAreaPairing(venue)
+
+  return (
+    <section className="curated-itinerary-flex" aria-label="Curated venue flex option">
+      <div>
+        <span className="eyebrow">Selected venue</span>
+        <h3>{venue.name}</h3>
+        <p>{reason}. This replaces the demo food stop in your plan summary only; it is not booked.</p>
+      </div>
+      <div className="curated-flex-details">
+        {backup && <span><strong>Same-area backup</strong>{backup.name}</span>}
+        {pairing && <span><strong>{pairing.kind} pairing</strong>{pairing.name}</span>}
+      </div>
+      <div className="place-actions">
+        <a className="link-button" href={venue.mapsUrl} target="_blank" rel="noreferrer">Open map</a>
+        {venue.websiteUrl && (
+          <a className="ghost link-button" href={venue.websiteUrl} target="_blank" rel="noreferrer">Official site</a>
+        )}
       </div>
     </section>
   )
@@ -1893,6 +2105,7 @@ function ItineraryPanel({
   adjustmentMessage,
   copied,
   onCopy,
+  selectedVenue,
 }: {
   ranked: RankedPlan
   intake: Intake
@@ -1907,10 +2120,12 @@ function ItineraryPanel({
   adjustmentMessage: string
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
+  selectedVenue?: CuratedVenueMatch
 }) {
   const inviteText = `${inviteDraft}
 
 Plan: ${ranked.plan.title}
+Venue: ${selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}
 Meet: ${ranked.meetArea} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(
     intake.dateStart,
     0,
@@ -1923,6 +2138,7 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
         ranked={ranked}
         intake={intake}
         planState={planState}
+        selectedVenue={selectedVenue}
       />
 
       <div className="save-plan-banner">
@@ -1956,6 +2172,8 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
           </div>
         ))}
       </div>
+
+      <CuratedItineraryFlex match={selectedVenue} />
 
       <div className="forecast-strip">
         <span>Demo crowd estimate - not live: {ranked.crowdForecast}</span>
@@ -2015,10 +2233,12 @@ function PlanSummaryCard({
   ranked,
   intake,
   planState,
+  selectedVenue,
 }: {
   ranked: RankedPlan
   intake: Intake
   planState: PlanState
+  selectedVenue?: CuratedVenueMatch
 }) {
   return (
     <section className="plan-summary" aria-label="Plan summary">
@@ -2035,7 +2255,7 @@ function PlanSummaryCard({
         <span><strong>Budget</strong>{formatCostRange(ranked.plan.estimatedCostTotal)}</span>
         <span><strong>Vibe</strong>{ranked.plan.tags.slice(0, 2).join(' + ')}</span>
         <span><strong>Backup</strong>{ranked.plan.backupOptions[0] ?? 'nearby cafe'}</span>
-        <span><strong>Anchor</strong>{primaryAnchor(ranked.plan, ranked.meetArea)}</span>
+        <span><strong>Venue</strong>{selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}</span>
       </div>
       <div className="summary-note">
         <strong>Plan note</strong>
@@ -2367,7 +2587,7 @@ function SavedSheet({
   onClose,
 }: {
   saved: SavedItinerary[]
-  onOpen: (planId: string) => void
+  onOpen: (item: SavedItinerary) => void
   onRemove: (id: string) => void
   onClear: () => void
   onClose: () => void
@@ -2387,9 +2607,10 @@ function SavedSheet({
               <div>
                 <strong>{item.title}</strong>
                 <p>{item.meetArea}</p>
+                {item.venueName && <small>Venue: {item.venueName}</small>}
               </div>
               <div className="saved-actions">
-                <button type="button" className="secondary" onClick={() => onOpen(item.planId)}>
+                <button type="button" className="secondary" onClick={() => onOpen(item)}>
                   Open
                 </button>
                 <button type="button" className="ghost" onClick={() => onRemove(item.id)}>

@@ -37,6 +37,7 @@ Key references:
 - [`docs/testing/ab-testing-codex-handoff.md`](docs/testing/ab-testing-codex-handoff.md) — current ChatGPT/Codex-ready A/B and dogfood brief.
 - [`docs/testing/reports/2026-07-17-live-variant-a-baseline.md`](docs/testing/reports/2026-07-17-live-variant-a-baseline.md) — initial deployed landing-page A/B baseline.
 - [`docs/testing/reports/2026-07-17-technical-verification.md`](docs/testing/reports/2026-07-17-technical-verification.md) — evidence behind the controlled-alpha readiness verdict.
+- [`docs/data/PORTLAND_VENUE_SEED.md`](docs/data/PORTLAND_VENUE_SEED.md) — 30+ researched Portland restaurants/cafés, provenance rules, and update policy.
 
 ## Deployment
 

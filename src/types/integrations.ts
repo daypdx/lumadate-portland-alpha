@@ -2,7 +2,7 @@ export type IntegrationProviderMode = 'mock' | 'live'
 
 export type PlaceCandidate = {
   id: string
-  source: 'mock' | 'google-places' | 'partner'
+  source: 'mock' | 'curated' | 'google-places' | 'partner'
   name: string
   category: string
   neighborhood: string

@@ -843,6 +843,60 @@ button,
   box-shadow: inset 0 0 0 2px rgba(21, 148, 140, 0.14);
 }
 
+.curated-venue-panel {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid rgba(90, 62, 102, 0.2);
+  border-radius: var(--wiz-radius-md);
+  background: linear-gradient(135deg, var(--wiz-plum-soft), rgba(255, 255, 255, 0.86));
+}
+
+.curated-venue-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.curated-venue-card {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid var(--wiz-border);
+  border-radius: var(--wiz-radius-sm);
+  background: var(--wiz-surface-solid);
+}
+
+.curated-venue-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.curated-venue-card p,
+.curated-venue-card small {
+  margin: 0;
+  color: var(--wiz-muted);
+}
+
+.venue-kind {
+  color: var(--wiz-plum);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.venue-match-reason {
+  width: fit-content;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: var(--wiz-sage-soft);
+  color: var(--wiz-primary-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .place-panel {
   display: grid;
   gap: 12px;
@@ -1177,7 +1231,8 @@ button:disabled {
   .summary-grid,
   .choice-grid,
   .review-grid,
-  .meet-map-card {
+  .meet-map-card,
+  .curated-venue-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4079,6 +4134,133 @@ body,
   bottom: auto;
 }
 
+.curated-venue-panel {
+  border-color: var(--app-border);
+  background: linear-gradient(145deg, rgba(78, 52, 68, 0.88), rgba(27, 21, 25, 0.92));
+  box-shadow: var(--app-shadow-card);
+}
+
+.curated-venue-panel .compact-heading p,
+.curated-venue-panel .curation-disclaimer {
+  color: var(--app-muted);
+  opacity: 1;
+  font-weight: 650;
+}
+
+.curated-venue-panel .curation-disclaimer strong {
+  color: var(--app-ink);
+}
+
+.venue-coverage-note {
+  padding: 10px 12px;
+  border-left: 3px solid var(--app-apricot);
+  background: var(--app-apricot-soft);
+  color: var(--app-ink-soft);
+}
+
+.curated-venue-card {
+  border-color: var(--app-border);
+  background: rgba(24, 20, 23, 0.78);
+  color: var(--app-ink);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.curated-venue-card.selected {
+  border-color: var(--app-border-strong);
+  box-shadow: var(--app-glow);
+  transform: translateY(-1px);
+}
+
+.curated-venue-card p,
+.curated-venue-card small {
+  color: var(--app-muted);
+}
+
+.curated-venue-card .venue-kind {
+  color: #f2d98d;
+}
+
+.venue-specific-caution {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-warning) 52%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-warning) 18%, transparent);
+  color: var(--app-ink) !important;
+  font-size: 0.82rem;
+}
+
+.venue-evidence {
+  border-top: 1px solid rgba(242, 217, 141, 0.22);
+  padding-top: 4px;
+}
+
+.venue-evidence summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--app-primary-strong);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.venue-evidence p {
+  margin-bottom: 8px;
+}
+
+.venue-evidence a {
+  color: var(--app-primary-strong);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.curated-venue-card .place-actions {
+  margin-top: auto;
+}
+
+.venue-flex-options {
+  display: grid;
+  gap: 3px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(242, 217, 141, 0.22);
+}
+
+.venue-flex-options a {
+  color: #f2d98d;
+}
+
+.curated-itinerary-flex {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr);
+  gap: 14px;
+  align-items: center;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--app-primary-soft) 44%, transparent);
+}
+
+.curated-itinerary-flex h3,
+.curated-itinerary-flex p {
+  margin: 4px 0 0;
+}
+
+.curated-flex-details {
+  display: grid;
+  gap: 8px;
+}
+
+.curated-flex-details span {
+  display: grid;
+  gap: 2px;
+  color: var(--app-muted);
+}
+
+.curated-itinerary-flex .place-actions {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 720px) {
   .alpha-footer {
     margin-bottom: 28px;
@@ -4093,7 +4275,8 @@ body,
 
   .itinerary-primary-actions,
   .secondary-tool-grid,
-  .save-plan-banner {
+  .save-plan-banner,
+  .curated-itinerary-flex {
     grid-template-columns: 1fr;
   }
 

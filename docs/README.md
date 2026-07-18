@@ -10,6 +10,7 @@ This directory is the durable project record for the Portland controlled alpha. 
 - [2026-07-17 live Variant A baseline](testing/reports/2026-07-17-live-variant-a-baseline.md) — initial deployed landing-page findings and highest-value A/B questions.
 - [2026-07-17 thorough A/B and dogfood QA](testing/reports/2026-07-17-thorough-live-ab-dogfood.md) — completed full-funnel findings, launch gates, persona projections, and Variant B direction.
 - [2026-07-17 technical verification](testing/reports/2026-07-17-technical-verification.md) — commands and results supporting the current alpha verdict.
+- [Portland curated venue seed](data/PORTLAND_VENUE_SEED.md) — researched restaurant/café inventory, provenance rules, app behavior, and refresh policy.
 
 ## Product definition
 
