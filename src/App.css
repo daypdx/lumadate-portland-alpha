@@ -1886,6 +1886,111 @@ body {
   }
 }
 
+/* Controlled-alpha trust and itinerary hierarchy corrections. */
+.demo-profile-banner {
+  display: flex;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto 16px;
+  padding: 12px 14px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(231, 198, 111, 0.42);
+  border-radius: 8px;
+  background: rgba(231, 198, 111, 0.12);
+  color: var(--app-ink);
+  text-align: center;
+}
+
+.demo-profile-banner strong,
+.alpha-plan-ribbon {
+  color: var(--app-primary-strong);
+  text-transform: uppercase;
+}
+
+.privacy-correction {
+  display: block;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-warning) 46%, var(--app-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--app-warning) 14%, var(--app-surface-solid));
+  color: var(--app-ink);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.privacy-lock {
+  cursor: default;
+}
+
+.alpha-plan-ribbon {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(231, 198, 111, 0.32);
+  border-radius: 6px;
+  background: rgba(231, 198, 111, 0.09);
+  font-size: 0.75rem;
+  font-weight: 850;
+  text-align: center;
+}
+
+.itinerary-primary-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.itinerary-secondary {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: rgba(24, 20, 23, 0.42);
+}
+
+.itinerary-secondary > summary {
+  min-height: 44px;
+  padding: 11px 8px;
+  color: var(--app-primary-strong);
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.itinerary-secondary > :not(summary) {
+  margin-top: 14px;
+}
+
+.secondary-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bottom-nav {
+  position: static;
+  bottom: auto;
+}
+
+@media (max-width: 720px) {
+  .demo-profile-banner {
+    width: calc(100% - 24px);
+    align-items: flex-start;
+    flex-direction: column;
+    text-align: left;
+  }
+
+  .itinerary-primary-actions,
+  .secondary-tool-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .alpha-footer {
+    margin-bottom: 28px;
+  }
+}
+
 /* Selected LumaDate cosmetic system.
    This final layer intentionally wins the cascade so the whole app canvas,
    not only buttons and chips, follows the Calm Chemistry direction. */
@@ -3935,5 +4040,29 @@ body,
     min-height: 38px;
     padding: 7px 5px;
     font-size: 0.78rem;
+  }
+}
+
+/* Final responsive corrections must remain last in the cascade. */
+.bottom-nav {
+  position: static;
+  bottom: auto;
+}
+
+@media (max-width: 720px) {
+  .alpha-footer {
+    margin-bottom: 28px;
+  }
+
+  .demo-profile-banner {
+    width: calc(100% - 24px);
+    align-items: flex-start;
+    flex-direction: column;
+    text-align: left;
+  }
+
+  .itinerary-primary-actions,
+  .secondary-tool-grid {
+    grid-template-columns: 1fr;
   }
 }

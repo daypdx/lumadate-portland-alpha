@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultIntake, dateWindow, meetAreaFor, rankPlans, safetyText } from './App'
+import plansJson from './data/datePlans.json'
+import {
+  createDefaultIntake,
+  createExampleIntake,
+  dateWindow,
+  looksLikeStreetAddress,
+  meetAreaFor,
+  publicStopDetails,
+  rankPlans,
+  safetyText,
+  type DatePlan,
+  type RankedPlan,
+} from './App'
 
 describe('Portland alpha planning safeguards', () => {
   it('creates a current date window instead of a hardcoded launch date', () => {
@@ -40,6 +52,50 @@ describe('Portland alpha planning safeguards', () => {
 
     expect(meetArea).not.toContain('123 Private Street')
     expect(publicText).not.toContain('123 Private Street')
+    expect(publicText).toContain('Date:')
+  })
+
+  it('keeps personal planning blank while the example profile is clearly seeded', () => {
+    const now = new Date(2026, 6, 17, 12, 0)
+    const personal = createDefaultIntake(now)
+    const example = createExampleIntake(now)
+
+    expect(personal.activityTypes).toEqual([])
+    expect(personal.moodTypes).toEqual([])
+    expect(personal.dateEnjoysText).toBe('')
+    expect(personal.userEnjoysText).toBe('')
+    expect(personal.mustAvoid).toBe('')
+    expect(example.activityTypes.length).toBeGreaterThan(0)
+    expect(example.dateEnjoysText).toContain('parks')
+  })
+
+  it('detects street-like input for visible privacy correction', () => {
+    expect(looksLikeStreetAddress('1234 SE Privacy Leak St, Portland, OR')).toBe(true)
+    expect(looksLikeStreetAddress('SE Portland')).toBe(false)
+  })
+
+  it('maps every safety stop through its explicit itinerary place reference', () => {
+    const intake = createExampleIntake(new Date(2026, 6, 17, 12, 0))
+
+    for (const plan of plansJson as DatePlan[]) {
+      const ranked: RankedPlan = {
+        plan,
+        score: 0,
+        reasons: [],
+        warnings: [],
+        meetArea: meetAreaFor(intake, plan),
+        trafficNote: '',
+        leaveBy: '',
+        crowdForecast: '',
+        crowdBackup: '',
+      }
+      const stops = publicStopDetails(ranked, intake)
+
+      plan.itinerary.forEach((step, index) => {
+        expect(step.placeIndex).toBeTypeOf('number')
+        expect(stops[index].placeName).toBe(plan.places?.[step.placeIndex ?? -1]?.name)
+      })
+    }
   })
 
   it('surfaces dietary verification warnings in ranked plans', () => {

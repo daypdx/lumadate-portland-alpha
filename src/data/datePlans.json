@@ -40,24 +40,28 @@
       {
         "timeOffsetMinutes": 0,
         "title": "Meet at a public landmark near dinner",
+        "placeIndex": 0,
         "description": "Neutral, easy-to-find meeting point. Exact private origins are not shared.",
         "canReplace": false
       },
       {
         "timeOffsetMinutes": 15,
         "title": "Sushi dinner",
+        "placeIndex": 0,
         "description": "Reservation recommended. Keep the table time flexible if possible.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 105,
         "title": "Jazz set",
+        "placeIndex": 1,
         "description": "Shared music gives the date an anchor without forcing constant conversation.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 210,
         "title": "Optional bookstore or quiet dessert",
+        "placeIndex": 2,
         "description": "Low-pressure extension if the night is going well.",
         "canReplace": true
       }
@@ -168,18 +172,21 @@
       {
         "timeOffsetMinutes": 0,
         "title": "Meet for coffee",
+        "placeIndex": 0,
         "description": "Start somewhere public and casual.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 45,
         "title": "Nearby art/gallery walk",
+        "placeIndex": 1,
         "description": "Movement keeps it from feeling like an interview.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 105,
         "title": "Optional dessert",
+        "placeIndex": 2,
         "description": "Extend only if both people want to.",
         "canReplace": true
       }
@@ -285,24 +292,28 @@
       {
         "timeOffsetMinutes": 0,
         "title": "Meet at Laurelhurst Park public entrance",
+        "placeIndex": 0,
         "description": "Start at a visible public park meet point. Private origins stay out of the shared plan.",
         "canReplace": false
       },
       {
         "timeOffsetMinutes": 15,
         "title": "Walk the Laurelhurst Park loop",
+        "placeIndex": 0,
         "description": "A relaxed public walk gives the date movement and easy conversation before food.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 60,
         "title": "Dinner nearby in SE Portland",
+        "placeIndex": 1,
         "description": "Pick a real nearby restaurant and verify current hours or wait time before leaving the park.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 115,
         "title": "Optional coffee or dessert extension",
+        "placeIndex": 2,
         "description": "Keep the night flexible with a short public cafe/dessert backup if the date is going well.",
         "canReplace": true
       }
@@ -407,18 +418,21 @@
       {
         "timeOffsetMinutes": 0,
         "title": "Meet at studio",
+        "placeIndex": 0,
         "description": "Arrive 10 minutes early for check-in.",
         "canReplace": false
       },
       {
         "timeOffsetMinutes": 15,
         "title": "Pottery class",
+        "placeIndex": 1,
         "description": "Activity carries the date and reduces awkward silence.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 135,
         "title": "Coffee afterward",
+        "placeIndex": 2,
         "description": "Optional debrief after the class.",
         "canReplace": true
       }
@@ -522,18 +536,21 @@
       {
         "timeOffsetMinutes": 0,
         "title": "Mocktails or snacks",
+        "placeIndex": 1,
         "description": "Start before the show without making alcohol required.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 45,
         "title": "Comedy show",
+        "placeIndex": 0,
         "description": "Shared entertainment creates easy conversation later.",
         "canReplace": true
       },
       {
         "timeOffsetMinutes": 135,
         "title": "Post-show walk or dessert",
+        "placeIndex": 2,
         "description": "Optional extension if it goes well.",
         "canReplace": true
       }

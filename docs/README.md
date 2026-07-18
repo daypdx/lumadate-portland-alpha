@@ -8,6 +8,7 @@ This directory is the durable project record for the Portland controlled alpha. 
 - [Architecture decision 0001](decisions/0001-portland-web-alpha-before-native.md) — why LumaDate is validating a Portland web alpha before live-data expansion or native apps.
 - [A/B and dogfood handoff](testing/ab-testing-codex-handoff.md) — repeatable review brief and regression priorities.
 - [2026-07-17 live Variant A baseline](testing/reports/2026-07-17-live-variant-a-baseline.md) — initial deployed landing-page findings and highest-value A/B questions.
+- [2026-07-17 thorough A/B and dogfood QA](testing/reports/2026-07-17-thorough-live-ab-dogfood.md) — completed full-funnel findings, launch gates, persona projections, and Variant B direction.
 - [2026-07-17 technical verification](testing/reports/2026-07-17-technical-verification.md) — commands and results supporting the current alpha verdict.
 
 ## Product definition

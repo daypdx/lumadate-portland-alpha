@@ -27,6 +27,7 @@ type PlanStep = {
   title: string
   description: string
   canReplace: boolean
+  placeIndex?: number
 }
 
 type Place = {
@@ -151,20 +152,37 @@ export function createDefaultIntake(now = new Date()): Intake {
     transportMode: 'driving',
     budgetMode: 'total',
     budgetMax: 120,
+    foodWanted: 'maybe',
+    cuisineLikes: '',
+    dietaryLimits: '',
+    alcoholPreference: 'alcohol_ok',
+    activityTypes: [],
+    indoorOutdoor: 'either',
+    moodTypes: [],
+    energyLevel: 3,
+    romanceLevel: 3,
+    crowdComfort: 3,
+    dateEnjoysText: '',
+    userEnjoysText: '',
+    firstDateSafeMode: true,
+    safetyShareEnabled: true,
+    mustAvoid: '',
+  }
+}
+
+export function createExampleIntake(now = new Date()): Intake {
+  return {
+    ...createDefaultIntake(now),
     foodWanted: 'yes',
     cuisineLikes: 'Thai, pizza, coffee, dessert',
-    dietaryLimits: '',
     alcoholPreference: 'mocktail_friendly',
     activityTypes: ['dinner', 'outdoors', 'scenic_walk', 'coffee', 'quiet_conversation'],
     indoorOutdoor: 'weather_safe',
     moodTypes: ['chill', 'quiet', 'romantic'],
-    energyLevel: 3,
     romanceLevel: 4,
     crowdComfort: 2,
     dateEnjoysText: 'They said they like parks, restaurants, coffee, and quiet places.',
     userEnjoysText: 'I like walkable Portland plans with good food and a relaxed park stop.',
-    firstDateSafeMode: true,
-    safetyShareEnabled: true,
     mustAvoid: 'long drives, crowded bars, long waits',
   }
 }
@@ -393,6 +411,12 @@ function formatMoney(amount: number): string {
   return `$${amount}`
 }
 
+function formatCostRange(amount: number): string {
+  const low = Math.max(20, Math.floor(amount / 10) * 10)
+  const high = Math.ceil((amount * 1.5) / 10) * 10
+  return `$${low}-$${high} example total`
+}
+
 function formatDuration(minutes: number): string {
   if (minutes < 60) return `${minutes} min`
   const hours = Math.floor(minutes / 60)
@@ -402,6 +426,16 @@ function formatDuration(minutes: number): string {
 
 function cleanLabel(value: string): string {
   return value.replace('_', ' ')
+}
+
+function formatPlanDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Date not set'
+  return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+export function looksLikeStreetAddress(value: string): boolean {
+  return /^\s*\d{1,6}\s+\S+/i.test(value.trim())
 }
 
 function placePreview(plan: DatePlan): string {
@@ -648,6 +682,7 @@ export function rankPlans(intake: Intake): RankedPlan[] {
 
 function App() {
   const [started, setStarted] = useState(false)
+  const [experienceMode, setExperienceMode] = useState<'personal' | 'demo'>('personal')
   const [tab, setTab] = useState<Tab>('plan')
   const [wizardStep, setWizardStep] = useState(0)
   const [intake, setIntake] = useState<Intake>(() => normalizeIntake(parseStored(storageKeys.intake, defaultIntake)))
@@ -778,10 +813,11 @@ function App() {
 
   function startDemo() {
     setSheet(null)
-    setIntake(createDefaultIntake())
+    setIntake(createExampleIntake())
+    setExperienceMode('demo')
     setStarted(true)
     setTab('options')
-    showToast('Example loaded. Ranked plans are ready.')
+    showToast('Clearly labeled example loaded.')
     window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
   }
 
@@ -790,9 +826,10 @@ function App() {
     localStorage.removeItem(storageKeys.saved)
     localStorage.removeItem(storageKeys.reminders)
     setIntake(createDefaultIntake())
+    setExperienceMode('personal')
     setSaved([])
     setReminders(defaultReminders)
-    showToast('Demo data cleared')
+    showToast('Planning data cleared')
   }
 
   if (!started) {
@@ -831,21 +868,23 @@ function App() {
             you are already meeting.
           </p>
           <div className="trust-row" aria-label="LumaDate trust promises">
-            <span>Private address hidden</span>
-            <span>No fake bookings</span>
-            <span>Adjust anytime</span>
+            <span>No account or GPS</span>
+            <span>Stored in this browser</span>
+            <span>No bookings or payments</span>
           </div>
           <div className="welcome-actions">
             <button type="button" className="primary" onClick={() => {
               setSheet(null)
+              setIntake(createDefaultIntake())
+              setExperienceMode('personal')
               setStarted(true)
               setTab('plan')
               showToast('Planning flow opened.')
             }}>
-              Start planning
+              Build my Portland plan
             </button>
             <button type="button" className="secondary" onClick={startDemo}>
-              Show me an example
+              Preview a clearly labeled demo
             </button>
           </div>
           <small>Use a city or neighborhood only. Private starting details are not retained or shared.</small>
@@ -872,6 +911,13 @@ function App() {
           Saved {saved.length}
         </button>
       </header>
+
+      {experienceMode === 'demo' && (
+        <div className="demo-profile-banner" role="status">
+          <strong>Demo profile</strong>
+          <span>These answers and results are examples, not your data.</span>
+        </div>
+      )}
 
       <section className="main-grid">
         <div className="planner-column">
@@ -1073,6 +1119,7 @@ function IntakeWizard({
   const [customBudget, setCustomBudget] = useState(!budgetOptions.some((option) => option.value === intake.budgetMax))
   const [customDateTime, setCustomDateTime] = useState(false)
   const [showFoodLimits, setShowFoodLimits] = useState(false)
+  const [locationNotice, setLocationNotice] = useState('')
   const [selectedDatePreset, setSelectedDatePreset] = useState<string | null>(() => inferDatePreset(intake.dateStart))
   const steps = ['Where', 'Time', 'Energy', 'Food', 'Likes', 'Safety', 'Review']
   const isLastStep = step === steps.length - 1
@@ -1088,6 +1135,11 @@ function IntakeWizard({
   function nextStep() {
     if (isLastStep) {
       onGenerate()
+      return
+    }
+    if (step === 0 && looksLikeStreetAddress(intake.startLocation)) {
+      onChange('startLocation', 'Portland, OR')
+      setLocationNotice('For privacy, use a city or neighborhood only. We replaced the street address with Portland, OR.')
       return
     }
     if (step === 1 && !intake.dateStart) applyDatePreset(0)
@@ -1165,11 +1217,20 @@ function IntakeWizard({
               Starting area
               <input
                 value={intake.startLocation}
-                onChange={(event) => onChange('startLocation', event.target.value)}
+                aria-describedby="starting-area-help starting-area-notice"
+                onChange={(event) => {
+                  setLocationNotice('')
+                  onChange('startLocation', event.target.value)
+                }}
                 placeholder="City or neighborhood"
                 autoComplete="off"
               />
-              <small>City or neighborhood only, never a street address.</small>
+              <small id="starting-area-help">City or neighborhood only, never a street address.</small>
+              {locationNotice && (
+                <span id="starting-area-notice" className="privacy-correction" role="alert">
+                  {locationNotice}
+                </span>
+              )}
             </label>
             <label>
               Planning area
@@ -1555,15 +1616,10 @@ function IntakeWizard({
               <strong>{intake.safetyShareEnabled ? 'On: ' : ''}Create a shareable safety note</strong>
               <span>Create copyable public plan details for a trusted contact.</span>
             </button>
-            <button
-              type="button"
-              className={intake.startLocationPrivate ? 'choice-card selected safety-choice' : 'choice-card safety-choice'}
-              aria-pressed={intake.startLocationPrivate}
-              onClick={() => onChange('startLocationPrivate', !intake.startLocationPrivate)}
-            >
-              <strong>{intake.startLocationPrivate ? 'On: ' : ''}Private origin hidden</strong>
-              <span>Use your location for planning only, not invite or safety text.</span>
-            </button>
+            <div className="choice-card selected safety-choice privacy-lock" role="note">
+              <strong>Always on: Private origin hidden</strong>
+              <span>Private addresses never appear in invites or safety text.</span>
+            </div>
           </div>
           <p className="privacy-note">Safety share uses public meet details only. No home/work address is included.</p>
         </div>
@@ -1683,8 +1739,8 @@ function guidanceForStep(step: number, intake: Intake) {
       tip: 'LumaDate looks for overlap, not perfection.',
     },
     {
-      title: 'Safety is copy-only.',
-      body: 'The safety share uses public stops and arrival times. Help me leave drafts never auto-send.',
+      title: 'Safety messages are drafts only.',
+      body: 'The safety share uses public stops and arrival times. LumaDate never sends or shares these drafts automatically.',
       tip: intake.safetyShareEnabled ? 'Safety share is on.' : 'Safety share is optional.',
     },
     {
@@ -1722,11 +1778,11 @@ function GuidanceCard({ step, intake }: { step: number; intake: Intake }) {
 function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step: number) => void }) {
   const reviewRows = [
     ['Where', 0, `${meetupStyleLabels[intake.meetupStyle]} by ${intake.transportMode} in ${intake.dateArea}.`],
-    ['Time', 1, `${dateStageLabels[intake.dateStage]} at ${offsetTime(intake.dateStart, 0)} with a ${endModeLabels[intake.endMode]} finish.`],
+    ['Time', 1, `${dateStageLabels[intake.dateStage]} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(intake.dateStart, 0)} with a ${endModeLabels[intake.endMode]} finish.`],
     ['Vibe', 2, `${intake.moodTypes.join(', ') || 'Flexible'} with ${intake.activityTypes.slice(0, 4).map(cleanLabel).join(', ')}.`],
     ['Budget', 3, budgetSummary(intake)],
     ['Food', 3, `${intake.foodWanted === 'no' ? 'No food needed' : `Food: ${intake.cuisineLikes || 'open'}`}; ${alcoholLabels[intake.alcoholPreference]}.`],
-    ['Matching', 4, intake.dateEnjoysText || 'No personal notes yet.'],
+    ['What they enjoy', 4, intake.dateEnjoysText || 'No personal notes yet.'],
     ['Safety', 5, `${intake.firstDateSafeMode ? 'First-date safe' : 'Flexible safety mode'}; ${intake.safetyShareEnabled ? 'safety share on' : 'safety share off'}.`],
   ] as const
 
@@ -1774,6 +1830,7 @@ function ResultsPanel({
         <h2>Pick the plan before we build the full itinerary.</h2>
         <p>Selecting a card only marks it. Use the confirmation button when it feels right.</p>
       </div>
+      <div className="alpha-plan-ribbon">Alpha plan · real place suggestions · live availability not checked</div>
       <div className="result-list">
         {rankedPlans.map((ranked, index) => (
           <button
@@ -1789,7 +1846,7 @@ function ResultsPanel({
             <span className="place-preview">{placePreview(ranked.plan)}</span>
             <span className="verification-note">Map and review handoff ready.</span>
             <span className="mini-meta">
-              {ranked.meetArea} · {formatMoney(ranked.plan.estimatedCostTotal)} · {formatDuration(ranked.plan.estimatedDurationMinutes)}
+              {ranked.meetArea} · {formatCostRange(ranked.plan.estimatedCostTotal)} · {formatDuration(ranked.plan.estimatedDurationMinutes)}
             </span>
             {activeId === ranked.plan.id && <span className="selected-plan-note">Selected</span>}
           </button>
@@ -1798,10 +1855,10 @@ function ResultsPanel({
       <div className="confirm-plan-bar">
         <div>
           <strong>{active?.plan.title}</strong>
-          <span>{active ? `${active.meetArea} · ${formatMoney(active.plan.estimatedCostTotal)} est.` : 'Choose a plan'}</span>
+          <span>{active ? `${active.meetArea} · ${formatCostRange(active.plan.estimatedCostTotal)}` : 'Choose a plan'}</span>
         </div>
         <button type="button" className="primary" onClick={onConfirm} disabled={!active}>
-          Use this plan
+          Open selected itinerary
         </button>
       </div>
     </section>
@@ -1838,7 +1895,7 @@ function ItineraryPanel({
   const inviteText = `${inviteDraft}
 
 Plan: ${ranked.plan.title}
-Meet: ${ranked.meetArea} at ${offsetTime(
+Meet: ${ranked.meetArea} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(
     intake.dateStart,
     0,
   )}
@@ -1850,45 +1907,17 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
         ranked={ranked}
         intake={intake}
         planState={planState}
-        onPlanState={onPlanState}
-        onOpenInvite={() => onOpenSheet('invite')}
       />
 
       {adjustmentMessage && <p className="adjustment-banner">{adjustmentMessage}</p>}
-
-      <div className="hero-card">
-        <span className="booking-badge">{bookingLabels[ranked.plan.bookingType]}</span>
-        <h2>{ranked.plan.title}</h2>
-        <p>{ranked.plan.shortPitch}</p>
-        <div className="place-preview hero-place-preview">
-          {placePreview(ranked.plan)}
-        </div>
-        <div className="meta-grid">
-          <span>{ranked.meetArea}</span>
-          <span>{formatMoney(ranked.plan.estimatedCostTotal)}</span>
-          <span>{formatDuration(ranked.plan.estimatedDurationMinutes)}</span>
-        </div>
-      </div>
-
-      <div className="reason-list">
-        {ranked.reasons.map((reason) => (
-          <p key={reason}>{reason}</p>
-        ))}
-        {ranked.warnings.map((warning) => (
-          <p className="warning" key={warning}>{warning}</p>
-        ))}
-      </div>
-
-      <MeetAreaMapCard ranked={ranked} intake={intake} />
-      <IntegrationReadinessCard />
-      <PlacePanel places={ranked.plan.places ?? []} ranked={ranked} intake={intake} />
+      <div className="alpha-plan-ribbon">Example estimates · verify route, hours, and availability externally</div>
 
       <div className="timeline">
         <div className="timeline-row">
           <time>{ranked.leaveBy.replace('Leave by ', '')}</time>
           <div>
-            <strong>{ranked.leaveBy}</strong>
-            <p>{ranked.trafficNote}</p>
+            <strong>Example leave time - verify route in Maps</strong>
+            <p>{ranked.leaveBy}. Demo traffic estimate: {ranked.trafficNote}</p>
           </div>
         </div>
         {ranked.plan.itinerary.map((step) => (
@@ -1903,38 +1932,56 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
       </div>
 
       <div className="forecast-strip">
-        <span>Crowd forecast: {ranked.crowdForecast}</span>
+        <span>Demo crowd estimate - not live: {ranked.crowdForecast}</span>
         <span>{ranked.crowdBackup}</span>
       </div>
 
-      <div className="button-grid">
-        <button type="button" className="secondary" onClick={onCompare}>
-          Compare other options
+      <div className="itinerary-primary-actions">
+        <button type="button" className="primary" onClick={() => onCopy('Invite copied', inviteText)}>
+          {copied === 'Invite copied' ? 'Copied' : 'Copy invite'}
         </button>
-        <button type="button" className="secondary" onClick={onGoAdjust}>
-          Adjust plan
-        </button>
-        <button type="button" className="primary" onClick={() => onOpenSheet('booking')}>
-          Book or reserve
-        </button>
-        <button type="button" className="secondary" onClick={() => onOpenSheet('reminders')}>
-          Set reminders
-        </button>
-        <button type="button" className="secondary" onClick={() => onOpenSheet('late')}>
-          Running late
+        <button type="button" className="secondary" onClick={() => onOpenSheet('booking')}>
+          Check hours & availability externally ↗
         </button>
         {intake.safetyShareEnabled && (
           <button type="button" className="secondary" onClick={() => onOpenSheet('safety')}>
             Safety share
           </button>
         )}
-        <button type="button" className="ghost" onClick={onSave}>
-          Save plan
-        </button>
-        <button type="button" className="ghost" onClick={() => onCopy('Invite copied', inviteText)}>
-          {copied === 'Invite copied' ? 'Copied' : 'Copy invite'}
-        </button>
       </div>
+
+      <details className="itinerary-secondary">
+        <summary>More plan details and tools</summary>
+        <MeetAreaMapCard ranked={ranked} intake={intake} />
+        <IntegrationReadinessCard />
+        <PlacePanel places={ranked.plan.places ?? []} ranked={ranked} intake={intake} />
+        <div className="reason-list">
+          {ranked.reasons.map((reason) => <p key={reason}>{reason}</p>)}
+          {ranked.warnings.map((warning) => <p className="warning" key={warning}>{warning}</p>)}
+        </div>
+        <div className="state-row" role="radiogroup" aria-label="Plan states">
+          {planStates.map((state) => (
+            <button
+              type="button"
+              role="radio"
+              key={state}
+              className={planState === state ? 'state-option active' : 'state-option'}
+              aria-checked={planState === state}
+              onClick={() => onPlanState(state)}
+            >
+              {state}
+            </button>
+          ))}
+        </div>
+        <div className="secondary-tool-grid">
+          <button type="button" className="secondary" onClick={() => onOpenSheet('invite')}>Edit invite starter</button>
+          <button type="button" className="secondary" onClick={onCompare}>Compare other options</button>
+          <button type="button" className="secondary" onClick={onGoAdjust}>Adjust plan</button>
+          <button type="button" className="secondary" onClick={() => onOpenSheet('reminders')}>Set reminders</button>
+          <button type="button" className="secondary" onClick={() => onOpenSheet('late')}>Running late</button>
+          <button type="button" className="ghost" onClick={onSave}>Save in this browser</button>
+        </div>
+      </details>
     </section>
   )
 }
@@ -1943,14 +1990,10 @@ function PlanSummaryCard({
   ranked,
   intake,
   planState,
-  onPlanState,
-  onOpenInvite,
 }: {
   ranked: RankedPlan
   intake: Intake
   planState: PlanState
-  onPlanState: (state: PlanState) => void
-  onOpenInvite: () => void
 }) {
   return (
     <section className="plan-summary" aria-label="Plan summary">
@@ -1961,35 +2004,18 @@ function PlanSummaryCard({
       <h2>{ranked.plan.title}</h2>
       <p>{ranked.plan.shortPitch}</p>
       <div className="summary-grid">
-        <span><strong>When</strong>{offsetTime(intake.dateStart, 0)} start</span>
+        <span><strong>When</strong>{formatPlanDate(intake.dateStart)} · {offsetTime(intake.dateStart, 0)}</span>
         <span><strong>Meet</strong>{ranked.meetArea}</span>
-        <span><strong>Travel</strong>{ranked.leaveBy}</span>
-        <span><strong>Budget</strong>{formatMoney(ranked.plan.estimatedCostTotal)} est.</span>
+        <span><strong>Travel</strong>Example: {ranked.leaveBy.toLowerCase()} · verify in Maps</span>
+        <span><strong>Budget</strong>{formatCostRange(ranked.plan.estimatedCostTotal)}</span>
         <span><strong>Vibe</strong>{ranked.plan.tags.slice(0, 2).join(' + ')}</span>
         <span><strong>Backup</strong>{ranked.plan.backupOptions[0] ?? 'nearby cafe'}</span>
         <span><strong>Anchor</strong>{primaryAnchor(ranked.plan, ranked.meetArea)}</span>
       </div>
       <div className="summary-note">
-        <strong>Tonight note</strong>
+        <strong>Plan note</strong>
         <span>{dressWeatherNote(ranked)} Availability is external; verify hours, reviews, and provider options before leaving.</span>
       </div>
-      <div className="state-row" role="radiogroup" aria-label="Plan states">
-        {planStates.map((state) => (
-          <button
-            type="button"
-            role="radio"
-            key={state}
-            className={planState === state ? 'state-option active' : 'state-option'}
-            aria-checked={planState === state}
-            onClick={() => onPlanState(state)}
-          >
-            {state}
-          </button>
-        ))}
-      </div>
-      <button type="button" className="primary wide" onClick={onOpenInvite}>
-        Edit invite starter
-      </button>
     </section>
   )
 }
@@ -2027,9 +2053,9 @@ function IntegrationReadinessCard() {
       </div>
       <div className="integration-pill-grid" aria-label="Integration status">
         <span>Map links ready</span>
-        <span>Place checks included</span>
-        <span>Weather estimate</span>
-        <span>Crowd estimate</span>
+        <span>External place checks</span>
+        <span>Demo weather placeholder</span>
+        <span>Demo crowd estimate - not live</span>
       </div>
     </section>
   )
@@ -2066,15 +2092,15 @@ function PlacePanel({ places, ranked, intake }: { places: Place[]; ranked: Ranke
             <p>{place.why}</p>
             <div className="place-signal-grid">
               <span>
-                <strong>Weather at arrival</strong>
+                <strong>Demo weather placeholder</strong>
                 {signals.weather.summary}
               </span>
               <span>
-                <strong>Estimated crowd</strong>
+                <strong>Demo crowd estimate - not live</strong>
                 {signals.crowd.label}
               </span>
               <span>
-                <strong>Route leg</strong>
+                <strong>Example route leg - verify in Maps</strong>
                   {signals.routeLeg.estimatedMinutes} min estimate
               </span>
             </div>
@@ -2273,7 +2299,7 @@ function SafetyPanel({
       <div className="section-heading">
         <span className="eyebrow">Safety share</span>
         <h2>Share the public version of the plan.</h2>
-        <p>Only public places and planned arrival times are included. Private home/work anchors stay out.</p>
+        <p>{formatPlanDate(intake.dateStart)}. Only public places and planned arrival times are included. Private home/work anchors stay out.</p>
       </div>
       <div className="public-stop-list" aria-label="Public safety stops">
         {stops.map((stop) => (
@@ -2350,7 +2376,7 @@ function SavedSheet({
         </div>
       )}
       <button type="button" className="ghost wide" onClick={onClear}>
-        Clear demo data
+        Clear planning data
       </button>
     </SheetFrame>
   )
@@ -2373,10 +2399,10 @@ function ForecastCard({ ranked, intake }: { ranked: RankedPlan; intake: Intake }
   return (
     <section className="side-card">
       <span className="eyebrow">Traffic and crowd</span>
-      <h3>{ranked.leaveBy}</h3>
-      <p>{ranked.trafficNote}</p>
-      <p>Weather at arrival: {weather.summary}</p>
-      <p>Estimated crowd: {ranked.crowdForecast}</p>
+      <h3>Example leave time - verify in Maps</h3>
+      <p>{ranked.leaveBy}. Demo traffic estimate: {ranked.trafficNote}</p>
+      <p>Demo weather placeholder: {weather.summary}</p>
+      <p>Demo crowd estimate - not live: {ranked.crowdForecast}</p>
       <small>Live Google Popular Times not connected. Verify before leaving.</small>
     </section>
   )
@@ -2402,16 +2428,9 @@ function SettingsCard({
           onChange={(event) => onChange('firstDateSafeMode', event.target.checked)}
         />
       </label>
-      <label>
-        Private start
-        <input
-          type="checkbox"
-          checked={intake.startLocationPrivate}
-          onChange={(event) => onChange('startLocationPrivate', event.target.checked)}
-        />
-      </label>
+      <p className="privacy-note"><strong>Private origin is always hidden.</strong> This protection cannot be turned off.</p>
       <button type="button" className="ghost wide" onClick={onClear}>
-        Clear demo data
+        Clear planning data
       </button>
     </section>
   )
@@ -2735,9 +2754,9 @@ function SheetFrame({ title, children, onClose }: { title: string; children: Rea
   )
 }
 
-function publicStopDetails(ranked: RankedPlan, intake: Intake) {
-  return ranked.plan.itinerary.map((step, index) => {
-    const place = ranked.plan.places?.[index]
+export function publicStopDetails(ranked: RankedPlan, intake: Intake) {
+  return ranked.plan.itinerary.map((step) => {
+    const place = step.placeIndex === undefined ? undefined : ranked.plan.places?.[step.placeIndex]
     const outdoor = place ? /park|walk|garden|outdoor/i.test(place.category) : ranked.plan.safetyProfile.outdoor
     return {
       time: offsetTime(intake.dateStart, step.timeOffsetMinutes),
@@ -2766,6 +2785,7 @@ Notes: ${stop.qualities || 'public stop; verify before leaving'}`)
   return `LumaDate safety share
 Plan: ${ranked.plan.title}
 Public meet area: ${ranked.meetArea}
+Date: ${formatPlanDate(intake.dateStart)}
 Start: ${offsetTime(intake.dateStart, 0)}
 Check-in: ${offsetTime(intake.dateStart, Math.min(ranked.plan.estimatedDurationMinutes, 150))}
 
