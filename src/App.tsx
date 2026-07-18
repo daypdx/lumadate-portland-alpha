@@ -700,6 +700,7 @@ function App() {
 
   const rankedPlans = useMemo(() => rankPlans(intake), [intake])
   const active = rankedPlans.find((item) => item.plan.id === activeId) ?? rankedPlans[0]
+  const isActiveSaved = saved.some((item) => item.planId === active.plan.id)
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -785,6 +786,7 @@ function App() {
   }
 
   function saveActive() {
+    const wasAlreadySaved = saved.some((item) => item.planId === active.plan.id)
     const record: SavedItinerary = {
       id: `${active.plan.id}-${Date.now()}`,
       planId: active.plan.id,
@@ -793,7 +795,7 @@ function App() {
       savedAt: new Date().toISOString(),
     }
     setSaved((current) => [record, ...current.filter((item) => item.planId !== active.plan.id)])
-    showToast('Plan saved')
+    showToast(wasAlreadySaved ? 'Saved plan updated' : 'Plan saved')
   }
 
   function showItinerary() {
@@ -907,8 +909,8 @@ function App() {
           <span className="topbar-alpha">Portland controlled alpha</span>
           <p>Thoughtful date plans without the stress.</p>
         </div>
-        <button type="button" className="ghost" onClick={() => saved.length ? setSheet('saved') : showToast('No saved plans yet.')}>
-          Saved {saved.length}
+        <button type="button" className="ghost" onClick={() => setSheet('saved')}>
+          Saved ({saved.length})
         </button>
       </header>
 
@@ -940,6 +942,8 @@ function App() {
               activeId={active.plan.id}
               onSelect={(id) => setActiveId(id)}
               onConfirm={confirmPlan}
+              onSave={saveActive}
+              isSaved={isActiveSaved}
             />
           )}
 
@@ -957,6 +961,7 @@ function App() {
                 window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
               }}
               onSave={saveActive}
+              isSaved={isActiveSaved}
               planState={planState}
               onPlanState={setPlanState}
               inviteDraft={inviteDraft}
@@ -1815,11 +1820,15 @@ function ResultsPanel({
   activeId,
   onSelect,
   onConfirm,
+  onSave,
+  isSaved,
 }: {
   rankedPlans: RankedPlan[]
   activeId: string
   onSelect: (id: string) => void
   onConfirm: () => void
+  onSave: () => void
+  isSaved: boolean
 }) {
   const active = rankedPlans.find((ranked) => ranked.plan.id === activeId) ?? rankedPlans[0]
 
@@ -1857,9 +1866,14 @@ function ResultsPanel({
           <strong>{active?.plan.title}</strong>
           <span>{active ? `${active.meetArea} · ${formatCostRange(active.plan.estimatedCostTotal)}` : 'Choose a plan'}</span>
         </div>
-        <button type="button" className="primary" onClick={onConfirm} disabled={!active}>
-          Open selected itinerary
-        </button>
+        <div className="confirm-plan-actions">
+          <button type="button" className="secondary" onClick={onSave} disabled={!active}>
+            {isSaved ? 'Update saved plan' : 'Save plan'}
+          </button>
+          <button type="button" className="primary" onClick={onConfirm} disabled={!active}>
+            Open selected itinerary
+          </button>
+        </div>
       </div>
     </section>
   )
@@ -1872,6 +1886,7 @@ function ItineraryPanel({
   onGoAdjust,
   onCompare,
   onSave,
+  isSaved,
   planState,
   onPlanState,
   inviteDraft,
@@ -1885,6 +1900,7 @@ function ItineraryPanel({
   onGoAdjust: () => void
   onCompare: () => void
   onSave: () => void
+  isSaved: boolean
   planState: PlanState
   onPlanState: (state: PlanState) => void
   inviteDraft: string
@@ -1908,6 +1924,16 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
         intake={intake}
         planState={planState}
       />
+
+      <div className="save-plan-banner">
+        <div>
+          <strong>{isSaved ? 'This plan is saved' : 'Want to keep this plan?'}</strong>
+          <span>Stored only in this browser. Find it anytime under Saved.</span>
+        </div>
+        <button type="button" className={isSaved ? 'secondary' : 'primary'} onClick={onSave}>
+          {isSaved ? 'Update saved plan' : 'Save plan'}
+        </button>
+      </div>
 
       {adjustmentMessage && <p className="adjustment-banner">{adjustmentMessage}</p>}
       <div className="alpha-plan-ribbon">Example estimates · verify route, hours, and availability externally</div>
@@ -1979,7 +2005,6 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
           <button type="button" className="secondary" onClick={onGoAdjust}>Adjust plan</button>
           <button type="button" className="secondary" onClick={() => onOpenSheet('reminders')}>Set reminders</button>
           <button type="button" className="secondary" onClick={() => onOpenSheet('late')}>Running late</button>
-          <button type="button" className="ghost" onClick={onSave}>Save in this browser</button>
         </div>
       </details>
     </section>
@@ -2354,7 +2379,7 @@ function SavedSheet({
         <h2>Your shortlist and settings.</h2>
       </div>
       {saved.length === 0 ? (
-        <p className="empty">No saved plans yet. Save one from the itinerary screen.</p>
+        <p className="empty">No saved plans yet. Choose Save plan from a ranked option or its itinerary.</p>
       ) : (
         <div className="saved-list">
           {saved.map((item) => (

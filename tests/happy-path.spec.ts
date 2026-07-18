@@ -1,13 +1,15 @@
 import { expect, test } from '@playwright/test'
 
-test('first-time planning opens Step 1 without an empty Saved modal', async ({ page }) => {
+test('Saved explains how to keep the first plan without interrupting planning', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Portland controlled alpha').first()).toBeVisible()
   await page.getByRole('button', { name: 'Build my Portland plan' }).click()
   await expect(page.getByRole('heading', { name: 'Where should the date happen?' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Saved 0' }).click()
-  await expect(page.getByText('No saved plans yet.')).toBeVisible()
+  await page.getByRole('button', { name: 'Saved (0)' }).click()
+  await expect(page.getByRole('dialog', { name: 'Saved plans' })).toBeVisible()
+  await expect(page.getByText('Choose Save plan from a ranked option or its itinerary.')).toBeVisible()
+  await page.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('heading', { name: 'Where should the date happen?' })).toBeVisible()
 })
 
@@ -40,8 +42,11 @@ test('example route stays labeled and its safety share matches the visible itine
   await page.getByRole('button', { name: 'Preview a clearly labeled demo' }).click()
   await expect(page.getByText('Demo profile')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Pick the plan before we build the full itinerary.' })).toBeVisible()
+  await page.getByRole('button', { name: 'Save plan' }).click()
+  await expect(page.getByRole('button', { name: 'Saved (1)' })).toBeVisible()
   await page.getByRole('button', { name: 'Open selected itinerary' }).click()
   await expect(page.locator('.itinerary')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Update saved plan' })).toBeVisible()
   await expect.poll(() => page.locator('.bottom-nav').evaluate((element) => getComputedStyle(element).position)).toBe('static')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 

@@ -4044,6 +4044,36 @@ body,
 }
 
 /* Final responsive corrections must remain last in the cascade. */
+.confirm-plan-bar .confirm-plan-actions {
+  display: flex;
+  grid-template-columns: none;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.save-plan-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-block: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-primary-soft) 38%, transparent);
+}
+
+.save-plan-banner div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.save-plan-banner span {
+  color: var(--app-muted);
+  font-size: 0.84rem;
+}
+
 .bottom-nav {
   position: static;
   bottom: auto;
@@ -4062,7 +4092,17 @@ body,
   }
 
   .itinerary-primary-actions,
-  .secondary-tool-grid {
+  .secondary-tool-grid,
+  .save-plan-banner {
     grid-template-columns: 1fr;
+  }
+
+  .confirm-plan-bar .confirm-plan-actions {
+    display: grid;
+    width: 100%;
+  }
+
+  .save-plan-banner button {
+    width: 100%;
   }
 }
