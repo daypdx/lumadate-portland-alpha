@@ -296,6 +296,47 @@ const inviteStarters = [
   'This looks like it fits what you mentioned. Want to make it the plan?',
 ]
 
+export const calmExitMessages = [
+  "I'm going to head out now. Thanks for meeting me.",
+  "I'm not feeling well, so I'm going to call it a night.",
+  'Something came up at home and I need to leave now. Take care.',
+  "My ride is here, so I'm heading out. Have a good night.",
+] as const
+
+const firmExitMessages = [
+  "I can't stay. I'm leaving now.",
+  "No. I'm leaving.",
+  "Please don't follow me.",
+] as const
+
+export type TrustedContactIntent = 'call_five' | 'call_now' | 'help_now'
+
+const trustedContactOptions: Array<{
+  id: TrustedContactIntent
+  label: string
+  tone: string
+  helper: string
+}> = [
+  {
+    id: 'call_five',
+    label: 'Call in 5 minutes',
+    tone: 'Discreet',
+    helper: 'Ask for a normal call that gives you a reason to leave.',
+  },
+  {
+    id: 'call_now',
+    label: 'Call me now',
+    tone: 'Clear',
+    helper: 'Ask them to call immediately and stay on the phone.',
+  },
+  {
+    id: 'help_now',
+    label: 'I need help leaving',
+    tone: 'Urgent',
+    helper: 'Share the public venue and ask them to follow your agreed safety plan.',
+  },
+]
+
 const meetingLabels: Record<MeetingMode, string> = {
   near_me: 'Meet near me',
   near_them: 'Meet near them',
@@ -485,6 +526,22 @@ function primaryAnchor(plan: DatePlan, fallback = 'Portland area'): string {
     ?? plan.places?.[0]?.name
     ?? plan.neighborhoods[0]
     ?? fallback
+}
+
+export function trustedContactMessage(
+  intent: TrustedContactIntent,
+  ranked: RankedPlan,
+  selectedVenue?: CuratedVenueMatch,
+): string {
+  if (intent === 'call_five') {
+    return 'Please call me in 5 minutes and say you need me. I want an easy exit from a date.'
+  }
+  if (intent === 'call_now') {
+    return 'Please call me now. I want to leave this date. Stay on the phone while I get to my ride.'
+  }
+
+  const venue = selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)
+  return `I need help leaving now. I'm at ${venue}, ${ranked.meetArea}. Call me and stay on the phone. If I do not answer, follow our safety plan.`
 }
 
 function providerModeLabel(mode: ProviderMode): string {
@@ -1175,7 +1232,13 @@ function App() {
         <AssistantSheet ranked={active} intake={intake} onClose={() => setSheet(null)} />
       )}
       {sheet === 'exit' && (
-        <ExitPlanSheet copied={copied} onCopy={copyText} onClose={() => setSheet(null)} />
+        <ExitPlanSheet
+          ranked={active}
+          selectedVenue={selectedVenueMatch}
+          copied={copied}
+          onCopy={copyText}
+          onClose={() => setSheet(null)}
+        />
       )}
       <AlphaFooter />
     </main>
@@ -2875,57 +2938,141 @@ function AssistantSheet({ ranked, intake, onClose }: { ranked: RankedPlan; intak
 }
 
 function ExitPlanSheet({
+  ranked,
+  selectedVenue,
   copied,
   onCopy,
   onClose,
 }: {
+  ranked: RankedPlan
+  selectedVenue?: CuratedVenueMatch
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
   onClose: () => void
 }) {
-  const exitMessages = [
-    "I'm going to head out now. Thanks for meeting up.",
-    "I'm not feeling well, so I'm going to call it a night.",
-    'Something came up and I need to leave. Take care.',
-    "I promised a friend I'd check in, so I'm heading out.",
-    "I'm going to get my ride now. Have a good night.",
-  ]
-  const contactMessage = 'Can you call me in 5 minutes? I may need an easy exit from this date.'
-  const firmMessages = ["I can't stay. I'm leaving now.", "Please don't follow me."]
+  const [contactIntent, setContactIntent] = useState<TrustedContactIntent>('call_five')
+  const [shareStatus, setShareStatus] = useState('')
+  const contactMessage = trustedContactMessage(contactIntent, ranked, selectedVenue)
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+
+  async function shareContactMessage() {
+    setShareStatus('')
+    if (!canShare) {
+      onCopy('Contact message copied', contactMessage)
+      setShareStatus('Device sharing is unavailable here, so the message was copied instead.')
+      return
+    }
+
+    try {
+      await navigator.share({
+        title: 'LumaDate trusted-contact request',
+        text: contactMessage,
+      })
+      setShareStatus('Share sheet closed. Confirm delivery in your messaging app; LumaDate cannot verify it.')
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setShareStatus('Share canceled. Nothing was sent by LumaDate.')
+        return
+      }
+      onCopy('Contact message copied', contactMessage)
+      setShareStatus('Sharing was unavailable, so the message was copied instead.')
+    }
+  }
 
   return (
     <SheetFrame title="Help me leave" onClose={onClose}>
       <p className="sheet-copy">
-        Copy-only drafts for a low-pressure exit. LumaDate does not send messages, call anyone,
-        or act as an emergency response service.
+        Choose the smallest step that helps. LumaDate does not send messages, call anyone,
+        monitor the date, or act as an emergency response service.
       </p>
-      <p className="emergency-note">If you feel unsafe or are in immediate danger, contact emergency services or a trusted person directly.</p>
-      <div className="exit-message-list">
-        {exitMessages.map((message) => (
+      <section className="exit-flow-section" aria-labelledby="leave-quietly-title">
+        <div className="exit-flow-heading">
+          <span className="exit-step-number">1</span>
+          <div>
+            <h3 id="leave-quietly-title">Leave quietly</h3>
+            <p>Tap a short line to copy it. You do not owe anyone a longer explanation.</p>
+          </div>
+        </div>
+        <div className="exit-message-list">
+          {calmExitMessages.map((message, index) => (
+            <button
+              type="button"
+              className="starter-card exit-message-card"
+              key={message}
+              onClick={() => onCopy('Exit message copied', message)}
+            >
+              <span>{index === 0 ? 'Simple and direct' : index === 1 ? 'Not feeling well' : index === 2 ? 'Something came up' : 'Ride is ready'}</span>
+              <strong>{message}</strong>
+            </button>
+          ))}
+        </div>
+        <details className="pressure-exit">
+          <summary>They are pressuring me</summary>
+          <p>Use a firm boundary, move toward staff or another public place, and avoid continuing to explain.</p>
+          <div className="note-list">
+            {firmExitMessages.map((message) => (
+              <button type="button" className="ghost" key={message} onClick={() => onCopy('Firm exit copied', message)}>
+                {message}
+              </button>
+            ))}
+          </div>
+        </details>
+      </section>
+
+      <section className="exit-flow-section trusted-contact-section" aria-labelledby="trusted-contact-title">
+        <div className="exit-flow-heading">
+          <span className="exit-step-number">2</span>
+          <div>
+            <h3 id="trusted-contact-title">Ask a trusted contact to call</h3>
+            <p>This alpha does not store a contact or phone number. You choose the recipient in your device's share sheet.</p>
+          </div>
+        </div>
+        <div className="trusted-contact-options" role="radiogroup" aria-label="Trusted contact urgency">
+          {trustedContactOptions.map((option) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={contactIntent === option.id}
+              className={contactIntent === option.id ? 'trusted-contact-option selected' : 'trusted-contact-option'}
+              key={option.id}
+              onClick={() => {
+                setContactIntent(option.id)
+                setShareStatus('')
+              }}
+            >
+              <span>{option.tone}</span>
+              <strong>{option.label}</strong>
+              <small>{option.helper}</small>
+            </button>
+          ))}
+        </div>
+        <textarea
+          className="copy-box trusted-message-preview"
+          data-copy-target="trusted-contact"
+          aria-label="Trusted contact message preview"
+          value={contactMessage}
+          readOnly
+        />
+        <div className="trusted-contact-actions">
+          <button type="button" className="primary" onClick={shareContactMessage}>
+            {canShare ? 'Open share sheet' : 'Copy for trusted contact'}
+          </button>
           <button
             type="button"
-            className="starter-card"
-            key={message}
-            onClick={() => onCopy('Exit message copied', message)}
+            className="secondary"
+            onClick={() => onCopy('Contact message copied', contactMessage, '[data-copy-target="trusted-contact"]')}
           >
-            {message}
+            {copied === 'Contact message copied' ? 'Copied' : 'Copy message'}
           </button>
-        ))}
-      </div>
-      <div className="provider-note">
-        <strong>Trusted contact</strong>
-        <span>{contactMessage}</span>
-      </div>
-      <button type="button" className="primary wide" onClick={() => onCopy('Contact message copied', contactMessage)}>
-        {copied === 'Contact message copied' ? 'Copied' : 'Copy trusted-contact text'}
-      </button>
-      <div className="note-list">
-        {firmMessages.map((message) => (
-          <button type="button" className="ghost" key={message} onClick={() => onCopy('Firm exit copied', message)}>
-            {message}
-          </button>
-        ))}
-      </div>
+        </div>
+        <small className="delivery-note">Review before sharing. LumaDate cannot confirm that a message was sent, delivered, or read.</small>
+        {shareStatus && <p className="share-status" role="status">{shareStatus}</p>}
+      </section>
+
+      <section className="emergency-note" aria-label="Emergency help">
+        <strong>Immediate danger is different.</strong>
+        <span>If you feel unsafe or are in immediate danger, move to a staffed public place and contact emergency services or a trusted person directly.</span>
+      </section>
     </SheetFrame>
   )
 }

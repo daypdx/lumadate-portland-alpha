@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import plansJson from './data/datePlans.json'
 import {
+  calmExitMessages,
   createDefaultIntake,
   createExampleIntake,
   dateWindow,
@@ -11,6 +12,7 @@ import {
   publicStopDetails,
   rankPlans,
   safetyText,
+  trustedContactMessage,
   type DatePlan,
   type RankedPlan,
 } from './App'
@@ -131,5 +133,27 @@ describe('Portland alpha planning safeguards', () => {
     const legacy = { ...createDefaultIntake(), budgetMode: 'per_person' as const }
 
     expect(normalizeIntake(legacy).budgetMode).toBe('total')
+  })
+
+  it('uses the researched calm-exit set without exposing the safety arrangement', () => {
+    expect(calmExitMessages).toHaveLength(4)
+    expect(calmExitMessages[0]).toBe("I'm going to head out now. Thanks for meeting me.")
+    expect(calmExitMessages.join(' ')).not.toContain("promised a friend I'd check in")
+  })
+
+  it('builds distinct trusted-contact messages using public plan details only', () => {
+    const intake = {
+      ...createExampleIntake(new Date(2026, 6, 17, 12, 0)),
+      startLocation: '123 Private Street',
+    }
+    const ranked = rankPlans(intake)[0]
+    const discreet = trustedContactMessage('call_five', ranked)
+    const clear = trustedContactMessage('call_now', ranked)
+    const urgent = trustedContactMessage('help_now', ranked)
+
+    expect(discreet).toContain('call me in 5 minutes')
+    expect(clear).toContain('Stay on the phone')
+    expect(urgent).toContain(ranked.meetArea)
+    expect(urgent).not.toContain('123 Private Street')
   })
 })

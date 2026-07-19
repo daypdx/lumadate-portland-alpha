@@ -147,3 +147,39 @@ test('safety share still uses public itinerary stops and no private origin', asy
   await page.getByRole('button', { name: 'Close' }).click()
   await expectNoHorizontalOverflow(page)
 })
+
+test('Help me leave separates calm exits, trusted-contact urgency, and emergency guidance', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async (data: ShareData) => {
+        ;(window as Window & { __sharedText?: string }).__sharedText = data.text
+      },
+    })
+  })
+  await acknowledgeAndEnter(page, 'Preview an example')
+  await page.getByRole('button', { name: 'Alerts', exact: true }).click()
+  await page.getByRole('button', { name: 'Help me leave', exact: true }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Help me leave' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText("I'm going to head out now. Thanks for meeting me.")).toBeVisible()
+  await expect(dialog.getByText("I'm not feeling well, so I'm going to call it a night.")).toBeVisible()
+  await expect(dialog.getByText("I promised a friend I'd check in, so I'm heading out.")).toHaveCount(0)
+  await expect(dialog.getByRole('radiogroup', { name: 'Trusted contact urgency' }).getByRole('radio')).toHaveCount(3)
+
+  const messagePreview = dialog.getByRole('textbox', { name: 'Trusted contact message preview' })
+  await expect(messagePreview).toHaveValue(/call me in 5 minutes/i)
+  await dialog.getByRole('radio', { name: 'Call me now' }).click()
+  await expect(messagePreview).toHaveValue(/Stay on the phone while I get to my ride/)
+  await dialog.getByRole('button', { name: 'Open share sheet' }).click()
+  await expect(dialog.locator('.share-status')).toContainText('LumaDate cannot verify it')
+  await expect.poll(() => page.evaluate(() => (
+    (window as Window & { __sharedText?: string }).__sharedText
+  ))).toContain('Stay on the phone while I get to my ride')
+
+  await dialog.getByRole('radio', { name: 'I need help leaving' }).click()
+  await expect(messagePreview).toHaveValue(/public meet point/)
+  await expect(dialog.getByLabel('Emergency help')).toContainText('Immediate danger is different.')
+  await expectNoHorizontalOverflow(page)
+})
