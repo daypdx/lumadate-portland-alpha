@@ -4,8 +4,10 @@ import {
   createDefaultIntake,
   createExampleIntake,
   dateWindow,
+  durationSettingFor,
   looksLikeStreetAddress,
   meetAreaFor,
+  normalizeIntake,
   publicStopDetails,
   rankPlans,
   safetyText,
@@ -117,5 +119,17 @@ describe('Portland alpha planning safeguards', () => {
     const warnings = rankPlans(intake).flatMap((ranked) => ranked.warnings).join(' ')
 
     expect(warnings).toContain('food or drink stop')
+  })
+
+  it('maps the stepped duration slider to the three supported timing modes', () => {
+    expect(durationSettingFor(0)).toEqual({ label: '90 minutes', mode: 'fixed_end', minutes: 90 })
+    expect(durationSettingFor(1)).toEqual({ label: '2-3 hours', mode: 'flexible', minutes: 180 })
+    expect(durationSettingFor(2)).toEqual({ label: 'Open-ended', mode: 'open_ended', minutes: 0 })
+  })
+
+  it('normalizes legacy per-person budgets to a total-date budget', () => {
+    const legacy = { ...createDefaultIntake(), budgetMode: 'per_person' as const }
+
+    expect(normalizeIntake(legacy).budgetMode).toBe('total')
   })
 })

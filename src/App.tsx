@@ -8,7 +8,7 @@ import {
   recommendCuratedVenues,
   type CuratedVenueMatch,
 } from './lib/curatedVenueRecommendations'
-import { buildMockStopSignals, mockWeatherAtArrival } from './lib/mockItinerarySignals'
+import { mockWeatherAtArrival } from './lib/mockItinerarySignals'
 import './App.css'
 
 type MeetingMode = 'near_me' | 'near_them' | 'fair_midpoint' | 'neutral_public'
@@ -17,9 +17,9 @@ type DateStage = 'first_date' | 'early_dating' | 'established' | 'anniversary' |
 type MeetupStyle = 'meeting_there' | 'i_pick_up' | 'they_pick_up' | 'fair_midpoint' | 'neutral_public'
 type BookingType = 'free' | 'walk_in' | 'reservation' | 'ticketed' | 'unknown'
 type ProviderMode = 'external_link' | 'call' | 'copy' | 'mock_checkout' | 'mock_reservation'
-type Tab = 'plan' | 'options' | 'itinerary' | 'adjust' | 'alerts' | 'safety'
+type Tab = 'plan' | 'options' | 'itinerary' | 'adjust' | 'venue' | 'alerts' | 'safety'
 type Sheet = 'booking' | 'reminders' | 'late' | 'safety' | 'invite' | 'saved' | 'assistant' | 'exit' | null
-type PlanState = 'Draft' | 'Proposed' | 'Agreed' | 'Booked externally' | 'Tonight' | 'Completed'
+type EntryIntent = 'personal' | 'demo'
 
 type ProviderAction = {
   type: string
@@ -144,6 +144,8 @@ const storageKeys = {
   reminders: 'lumadate-reminders',
 }
 
+const acknowledgementKey = 'lumadate-alpha-acknowledged'
+
 export function createDefaultIntake(now = new Date()): Intake {
   const { dateStart, dateEnd } = dateWindow(now, now.getHours() >= 21 ? 1 : 0)
 
@@ -205,8 +207,6 @@ const defaultReminders: ReminderSettings = {
   runningLate: true,
   safetyCheck: true,
 }
-
-const planStates: PlanState[] = ['Draft', 'Proposed', 'Agreed', 'Booked externally', 'Tonight', 'Completed']
 
 const moodOptions = ['chill', 'romantic', 'playful', 'adventurous', 'social', 'quiet']
 
@@ -279,11 +279,15 @@ const portlandAreaOptions = [
   'Sellwood / Moreland',
 ] as const
 
-const durationOptions = [
-  ['90 min', 'fixed_end', 90],
-  ['2-3 hr', 'flexible', 180],
-  ['Open-ended', 'open_ended', 0],
+export const durationOptions = [
+  { label: '90 minutes', mode: 'fixed_end', minutes: 90 },
+  { label: '2-3 hours', mode: 'flexible', minutes: 180 },
+  { label: 'Open-ended', mode: 'open_ended', minutes: 0 },
 ] as const
+
+export function durationSettingFor(index: number) {
+  return durationOptions[Math.max(0, Math.min(durationOptions.length - 1, Math.round(index)))]
+}
 
 const inviteStarters = [
   'Want to try this Thursday?',
@@ -313,12 +317,6 @@ const meetupStyleLabels: Record<MeetupStyle, string> = {
   they_pick_up: "They're picking me up",
   fair_midpoint: 'Fair midpoint',
   neutral_public: 'Neutral public area',
-}
-
-const endModeLabels: Record<EndMode, string> = {
-  fixed_end: 'fixed end',
-  flexible: 'flexible',
-  open_ended: 'open-ended',
 }
 
 const alcoholLabels: Record<Intake['alcoholPreference'], string> = {
@@ -399,8 +397,8 @@ function parseStored<T>(key: string, fallback: T): T {
   }
 }
 
-function normalizeIntake(value: Intake): Intake {
-  return { ...defaultIntake, ...value }
+export function normalizeIntake(value: Intake): Intake {
+  return { ...defaultIntake, ...value, budgetMode: 'total' }
 }
 
 function intakeForStorage(value: Intake): Intake {
@@ -433,12 +431,39 @@ function formatDuration(minutes: number): string {
   return leftover ? `${hours} hr ${leftover} min` : `${hours} hr`
 }
 
+function durationSummary(intake: Intake): string {
+  if (intake.endMode === 'fixed_end') return '90 minutes'
+  if (intake.endMode === 'open_ended') return 'open-ended'
+  return '2-3 hours'
+}
+
 function preferredVenueKinds(plan: DatePlan): CuratedVenueKind[] {
   const planTerms = [...plan.tags, ...plan.interestKeywords].map((term) => term.toLowerCase())
   const isCoffeePlan = planTerms.some((term) => /coffee|cafe|dessert/.test(term))
     && !planTerms.some((term) => /dinner|restaurant|sushi/.test(term))
 
   return isCoffeePlan ? ['cafe', 'dessert'] : ['restaurant']
+}
+
+function curatedVenuesForPlan(intake: Intake, plan: DatePlan, limit = 4): CuratedVenueMatch[] {
+  const preferredKinds = preferredVenueKinds(plan)
+  const matches = recommendCuratedVenues({
+    area: intake.dateArea,
+    categories: [...intake.activityTypes, ...intake.moodTypes, ...plan.tags, ...plan.interestKeywords],
+    budgetMax: intake.budgetMax,
+    cues: [
+      intake.cuisineLikes,
+      intake.dietaryLimits,
+      intake.alcoholPreference === 'alcohol_ok' ? '' : 'easy without alcohol',
+      intake.dateEnjoysText,
+      intake.userEnjoysText,
+    ].join(' '),
+    avoidCues: intake.mustAvoid,
+  }, recommendablePortlandVenues.length)
+  const preferred = matches.filter(({ venue }) => preferredKinds.includes(venue.kind))
+  const remaining = matches.filter(({ venue }) => !preferredKinds.includes(venue.kind))
+
+  return [...preferred, ...remaining].slice(0, limit)
 }
 
 function cleanLabel(value: string): string {
@@ -453,10 +478,6 @@ function formatPlanDate(value: string): string {
 
 export function looksLikeStreetAddress(value: string): boolean {
   return /^\s*\d{1,6}\s+\S+/i.test(value.trim())
-}
-
-function placePreview(plan: DatePlan): string {
-  return plan.places?.slice(0, 3).map((place) => place.name).join(' -> ') ?? plan.neighborhoods.join(' -> ')
 }
 
 function primaryAnchor(plan: DatePlan, fallback = 'Portland area'): string {
@@ -478,13 +499,12 @@ function summarizeDatePlan(intake: Intake): string {
   const area = intake.dateArea || intake.startLocation
   const interests = extractKeywords(`${intake.dateEnjoysText} ${intake.userEnjoysText}`).slice(0, 4)
   const interestText = interests.length ? ` with ${interests.join(', ')} interests` : ''
-  return `You're planning a ${endModeLabels[intake.endMode]} ${dateStageLabels[intake.dateStage].toLowerCase()} near ${area}, ${alcoholLabels[intake.alcoholPreference]}, under ${formatMoney(intake.budgetMax)}${interestText}.`
+  return `You're planning a ${durationSummary(intake)} ${dateStageLabels[intake.dateStage].toLowerCase()} near ${area}, ${alcoholLabels[intake.alcoholPreference]}, with up to ${formatMoney(intake.budgetMax)} total${interestText}.`
 }
 
 function budgetSummary(intake: Intake): string {
   const preset = budgetOptions.find((option) => option.value === intake.budgetMax)
-  const basis = intake.budgetMode === 'total' ? 'whole date' : 'per person'
-  return `${preset?.label ?? 'Custom max'}: up to ${formatMoney(intake.budgetMax)} ${basis}. Private planning guide only.`
+  return `${preset?.label ?? 'Custom max'}: up to ${formatMoney(intake.budgetMax)} total for the date. Private planning guide only.`
 }
 
 function fitLabel(ranked: RankedPlan, index: number): string {
@@ -625,7 +645,7 @@ export function rankPlans(intake: Intake): RankedPlan[] {
       }
       if (plan.estimatedCostTotal <= intake.budgetMax) {
         score += 12
-        reasons.push(`Fits your ${formatMoney(intake.budgetMax)} ${intake.budgetMode.replace('_', ' ')} budget.`)
+        reasons.push(`Fits your ${formatMoney(intake.budgetMax)} total-date budget.`)
       } else {
         score -= 20
         warnings.push(`Estimated ${formatMoney(plan.estimatedCostTotal)}, above your budget.`)
@@ -700,6 +720,8 @@ export function rankPlans(intake: Intake): RankedPlan[] {
 function App() {
   const [started, setStarted] = useState(false)
   const [experienceMode, setExperienceMode] = useState<'personal' | 'demo'>('personal')
+  const [entryIntent, setEntryIntent] = useState<EntryIntent | null>(null)
+  const [acknowledged, setAcknowledged] = useState(false)
   const [tab, setTab] = useState<Tab>('plan')
   const [wizardStep, setWizardStep] = useState(0)
   const [intake, setIntake] = useState<Intake>(() => normalizeIntake(parseStored(storageKeys.intake, defaultIntake)))
@@ -708,41 +730,22 @@ function App() {
   const [lateMinutes, setLateMinutes] = useState(10)
   const [copied, setCopied] = useState('')
   const [adjustmentMessage, setAdjustmentMessage] = useState('')
-  const [planState, setPlanState] = useState<PlanState>('Draft')
   const [inviteDraft, setInviteDraft] = useState(inviteStarters[1])
   const [reminders, setReminders] = useState<ReminderSettings>(() =>
     parseStored(storageKeys.reminders, defaultReminders),
   )
   const [saved, setSaved] = useState<SavedItinerary[]>(() => parseStored(storageKeys.saved, []))
-  const [selectedVenueId, setSelectedVenueId] = useState('')
+  const [selectedVenueByPlan, setSelectedVenueByPlan] = useState<Record<string, string>>({})
+  const entryTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   const rankedPlans = useMemo(() => rankPlans(intake), [intake])
   const active = rankedPlans.find((item) => item.plan.id === activeId) ?? rankedPlans[0]
-  const venueSuggestions = useMemo(() => {
-    const preferredKinds = preferredVenueKinds(active.plan)
-    const matches = recommendCuratedVenues({
-      area: intake.dateArea,
-      categories: [...intake.activityTypes, ...intake.moodTypes, ...active.plan.tags, ...active.plan.interestKeywords],
-      budgetMax: intake.budgetMax,
-      cues: [
-        intake.cuisineLikes,
-        intake.dietaryLimits,
-        intake.alcoholPreference === 'alcohol_ok' ? '' : 'easy without alcohol',
-        intake.dateEnjoysText,
-        intake.userEnjoysText,
-      ].join(' '),
-      avoidCues: intake.mustAvoid,
-    }, recommendablePortlandVenues.length)
-    const preferred = matches.filter(({ venue }) => preferredKinds.includes(venue.kind))
-    const remaining = matches.filter(({ venue }) => !preferredKinds.includes(venue.kind))
-
-    return [...preferred, ...remaining].slice(0, 4)
-  }, [active.plan, intake])
-  const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueId)
+  const venueSuggestionsByPlan = useMemo(() => Object.fromEntries(
+    rankedPlans.map((ranked) => [ranked.plan.id, curatedVenuesForPlan(intake, ranked.plan)]),
+  ) as Record<string, CuratedVenueMatch[]>, [intake, rankedPlans])
+  const venueSuggestions = venueSuggestionsByPlan[active.plan.id] ?? []
+  const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
     ?? venueSuggestions[0]
-  const isActiveSaved = saved.some((item) => (
-    item.planId === active.plan.id && (item.venueId ?? '') === (selectedVenueMatch?.venue.id ?? '')
-  ))
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -761,11 +764,6 @@ function App() {
       setActiveId(rankedPlans[0].plan.id)
     }
   }, [activeId, rankedPlans])
-
-  useEffect(() => {
-    const nextVenueId = selectedVenueMatch?.venue.id ?? ''
-    if (nextVenueId !== selectedVenueId) setSelectedVenueId(nextVenueId)
-  }, [selectedVenueId, selectedVenueMatch])
 
   function updateIntake<K extends keyof Intake>(key: K, value: Intake[K]) {
     setIntake((current) => ({ ...current, [key]: value }))
@@ -832,19 +830,25 @@ function App() {
     window.setTimeout(() => setCopied(''), 2600)
   }
 
-  function saveActive() {
-    const wasAlreadySaved = saved.some((item) => item.planId === active.plan.id)
+  function selectedVenueFor(ranked: RankedPlan): CuratedVenueMatch | undefined {
+    const matches = venueSuggestionsByPlan[ranked.plan.id] ?? []
+    return matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id]) ?? matches[0]
+  }
+
+  function savePlan(ranked: RankedPlan) {
+    const venueMatch = selectedVenueFor(ranked)
+    const wasAlreadySaved = saved.some((item) => item.planId === ranked.plan.id)
     const record: SavedItinerary = {
-      id: `${active.plan.id}-${Date.now()}`,
-      planId: active.plan.id,
-      title: active.plan.title,
-      meetArea: active.meetArea,
-      venueId: selectedVenueMatch?.venue.id,
-      venueName: selectedVenueMatch?.venue.name,
+      id: `${ranked.plan.id}-${Date.now()}`,
+      planId: ranked.plan.id,
+      title: ranked.plan.title,
+      meetArea: ranked.meetArea,
+      venueId: venueMatch?.venue.id,
+      venueName: venueMatch?.venue.name,
       savedAt: new Date().toISOString(),
     }
-    setSaved((current) => [record, ...current.filter((item) => item.planId !== active.plan.id)])
-    showToast(wasAlreadySaved ? 'Saved plan updated' : 'Plan saved')
+    setSaved((current) => [record, ...current.filter((item) => item.planId !== ranked.plan.id)])
+    showToast(wasAlreadySaved ? `${ranked.plan.title} updated` : `${ranked.plan.title} saved for later`)
   }
 
   function showItinerary() {
@@ -853,7 +857,8 @@ function App() {
     window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
   }
 
-  function confirmPlan() {
+  function openPlan(ranked = active) {
+    setActiveId(ranked.plan.id)
     setTab('itinerary')
     showToast('Itinerary opened.')
     window.setTimeout(() => {
@@ -862,11 +867,62 @@ function App() {
     }, 0)
   }
 
-  function startDemo() {
+  function adjustPlan(ranked = active) {
+    setActiveId(ranked.plan.id)
+    setTab('adjust')
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
+  }
+
+  function selectVenue(venueId: string) {
+    const match = venueSuggestions.find(({ venue }) => venue.id === venueId)
+    if (!match) return
+    setSelectedVenueByPlan((current) => ({ ...current, [active.plan.id]: venueId }))
+    setSaved((current) => current.map((item) => item.planId === active.plan.id
+      ? { ...item, venueId, venueName: match.venue.name, savedAt: new Date().toISOString() }
+      : item))
+    showToast(`Venue changed to ${match.venue.name}`)
+  }
+
+  function requestEntry(intent: EntryIntent, trigger: HTMLButtonElement) {
+    entryTriggerRef.current = trigger
+    if (sessionStorage.getItem(acknowledgementKey) === 'true') {
+      beginEntry(intent)
+      return
+    }
+    setAcknowledged(false)
+    setEntryIntent(intent)
+  }
+
+  function beginEntry(intent: EntryIntent) {
+    setEntryIntent(null)
+    if (intent === 'demo') {
+      startDemo()
+      return
+    }
+    const nextIntake = createDefaultIntake()
     setSheet(null)
-    setIntake(createExampleIntake())
+    setIntake(nextIntake)
+    setExperienceMode('personal')
+    setSelectedVenueByPlan({})
+    setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
+    setStarted(true)
+    setTab('plan')
+    showToast('Planning flow opened.')
+  }
+
+  function continueEntry() {
+    if (!entryIntent || !acknowledged) return
+    sessionStorage.setItem(acknowledgementKey, 'true')
+    beginEntry(entryIntent)
+  }
+
+  function startDemo() {
+    const nextIntake = createExampleIntake()
+    setSheet(null)
+    setIntake(nextIntake)
     setExperienceMode('demo')
-    setSelectedVenueId('')
+    setSelectedVenueByPlan({})
+    setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('options')
     showToast('Clearly labeled example loaded.')
@@ -879,7 +935,7 @@ function App() {
     localStorage.removeItem(storageKeys.reminders)
     setIntake(createDefaultIntake())
     setExperienceMode('personal')
-    setSelectedVenueId('')
+    setSelectedVenueByPlan({})
     setSaved([])
     setReminders(defaultReminders)
     showToast('Planning data cleared')
@@ -889,26 +945,7 @@ function App() {
     return (
       <main className="welcome">
         <section className="welcome-panel">
-          <div className="welcome-hero-preview" aria-hidden="true">
-            <div className="route-map-card">
-              <span className="map-pin map-pin-one">Meet</span>
-              <span className="map-pin map-pin-two">Dinner</span>
-              <span className="map-pin map-pin-three">Backup</span>
-              <span className="route-line route-line-one" />
-              <span className="route-line route-line-two" />
-            </div>
-            <div className="mini-itinerary-card card-one">
-              <span>6:30 PM</span>
-              <strong>Public meet point</strong>
-              <small>Private address hidden</small>
-            </div>
-            <div className="mini-itinerary-card card-two">
-              <span>8:15 PM</span>
-              <strong>Live music nearby</strong>
-              <small>Backup ready if crowded</small>
-            </div>
-          </div>
-          <span className="alpha-badge">Portland controlled alpha</span>
+          <span className="alpha-badge">Portland Alpha</span>
           <div className="brand-lockup">
             <span className="brand-mark image-mark">
               <img src={lumaDateEmblem} alt="" />
@@ -916,34 +953,26 @@ function App() {
             <span>LumaDate</span>
           </div>
           <h1>Plan the date without overthinking it.</h1>
-          <p>
-            Not a dating app. No swiping, no profiles - just a thoughtful Portland plan for someone
-            you are already meeting.
-          </p>
-          <div className="trust-row" aria-label="LumaDate trust promises">
-            <span>No account or GPS</span>
-            <span>Stored in this browser</span>
-            <span>No bookings or payments</span>
-          </div>
+          <p>Tell us the vibe, timing, and Portland area. We will turn it into three thoughtful plans.</p>
           <div className="welcome-actions">
-            <button type="button" className="primary" onClick={() => {
-              setSheet(null)
-              setIntake(createDefaultIntake())
-              setExperienceMode('personal')
-              setSelectedVenueId('')
-              setStarted(true)
-              setTab('plan')
-              showToast('Planning flow opened.')
-            }}>
+            <button type="button" className="primary" onClick={(event) => requestEntry('personal', event.currentTarget)}>
               Build my Portland plan
             </button>
-            <button type="button" className="secondary" onClick={startDemo}>
-              Preview a clearly labeled demo
+            <button type="button" className="secondary" onClick={(event) => requestEntry('demo', event.currentTarget)}>
+              Preview an example
             </button>
           </div>
-          <small>Use a city or neighborhood only. Private starting details are not retained or shared.</small>
-          <AlphaFooter />
+          <AlphaFooter compact />
         </section>
+        {entryIntent && (
+          <AlphaAcknowledgementDialog
+            checked={acknowledged}
+            onChecked={setAcknowledged}
+            onContinue={continueEntry}
+            onClose={() => setEntryIntent(null)}
+            returnFocus={entryTriggerRef.current}
+          />
+        )}
       </main>
     )
   }
@@ -992,14 +1021,12 @@ function App() {
             <ResultsPanel
               rankedPlans={rankedPlans}
               activeId={active.plan.id}
-              onSelect={(id) => setActiveId(id)}
-              onConfirm={confirmPlan}
-              onSave={saveActive}
-              isSaved={isActiveSaved}
-              venueSuggestions={venueSuggestions}
-              planningArea={intake.dateArea}
-              selectedVenueId={selectedVenueMatch?.venue.id ?? ''}
-              onSelectVenue={setSelectedVenueId}
+              venuesByPlan={venueSuggestionsByPlan}
+              selectedVenueByPlan={selectedVenueByPlan}
+              saved={saved}
+              onOpen={openPlan}
+              onSave={savePlan}
+              onAdjust={adjustPlan}
             />
           )}
 
@@ -1016,10 +1043,6 @@ function App() {
                 setTab('options')
                 window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
               }}
-              onSave={saveActive}
-              isSaved={isActiveSaved}
-              planState={planState}
-              onPlanState={setPlanState}
               inviteDraft={inviteDraft}
               adjustmentMessage={adjustmentMessage}
               copied={copied}
@@ -1035,9 +1058,22 @@ function App() {
               message={adjustmentMessage}
               onAdjust={setAdjustmentMessage}
               onSelect={setActiveId}
-              onGoItinerary={confirmPlan}
+              onGoItinerary={() => openPlan()}
+              onReviewVenue={() => setTab('venue')}
+              selectedVenue={selectedVenueMatch}
               onOpenLate={() => setSheet('late')}
               onOpenExit={() => setSheet('exit')}
+            />
+          )}
+
+          {tab === 'venue' && (
+            <VenueReviewPanel
+              matches={venueSuggestions}
+              planningArea={intake.dateArea}
+              selectedVenueId={selectedVenueMatch?.venue.id ?? ''}
+              onSelect={selectVenue}
+              onBack={() => setTab('adjust')}
+              onGoItinerary={() => openPlan()}
             />
           )}
 
@@ -1062,7 +1098,7 @@ function App() {
           ) : (
             <>
               <PrivacyCard intake={intake} ranked={active} />
-              <ForecastCard ranked={active} intake={intake} />
+              {(tab === 'options' || tab === 'alerts') && <ForecastCard ranked={active} intake={intake} />}
             </>
           )}
           <SettingsCard intake={intake} onChange={updateIntake} onClear={clearDemoData} />
@@ -1079,8 +1115,8 @@ function App() {
             <button
               type="button"
               key={value}
-              className={tab === value ? 'active' : ''}
-              aria-current={tab === value ? 'page' : undefined}
+              className={tab === value || (value === 'adjust' && tab === 'venue') ? 'active' : ''}
+              aria-current={tab === value || (value === 'adjust' && tab === 'venue') ? 'page' : undefined}
               onClick={() => setTab(value as Tab)}
             >
               {label}
@@ -1124,7 +1160,9 @@ function App() {
           saved={saved}
           onOpen={(item) => {
             setActiveId(item.planId)
-            setSelectedVenueId(item.venueId ?? '')
+            if (item.venueId) {
+              setSelectedVenueByPlan((current) => ({ ...current, [item.planId]: item.venueId ?? '' }))
+            }
             setTab('itinerary')
             setSheet(null)
           }}
@@ -1144,10 +1182,96 @@ function App() {
   )
 }
 
-function AlphaFooter() {
+function AlphaAcknowledgementDialog({
+  checked,
+  onChecked,
+  onContinue,
+  onClose,
+  returnFocus,
+}: {
+  checked: boolean
+  onChecked: (checked: boolean) => void
+  onContinue: () => void
+  onClose: () => void
+  returnFocus: HTMLButtonElement | null
+}) {
+  const dialogRef = useRef<HTMLElement>(null)
+  const checkboxRef = useRef<HTMLInputElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      )]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    checkboxRef.current?.focus()
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      returnFocus?.focus()
+    }
+  }, [returnFocus])
+
+  return (
+    <div className="limits-backdrop">
+      <section
+        ref={dialogRef}
+        className="limits-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="limits-title"
+      >
+        <div className="section-heading compact-heading">
+          <span className="eyebrow">Portland Alpha</span>
+          <h2 id="limits-title">Before you continue</h2>
+          <p>LumaDate is a Portland planning alpha.</p>
+        </div>
+        <ul className="limits-list">
+          <li>Use a city or neighborhood, never a private street address.</li>
+          <li>We curate venues, but you must verify hours, menus, prices, routes, and availability.</li>
+          <li>LumaDate does not book, reserve, pay, message, or call.</li>
+        </ul>
+        <label className="limits-check">
+          <input
+            ref={checkboxRef}
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => onChecked(event.target.checked)}
+          />
+          <span>I understand this is an alpha and I will verify details before relying on a plan.</span>
+        </label>
+        <div className="limits-actions">
+          <button type="button" className="ghost" onClick={onClose}>Go back</button>
+          <button type="button" className="primary" disabled={!checked} onClick={onContinue}>Continue</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AlphaFooter({ compact = false }: { compact?: boolean }) {
   return (
     <footer className="alpha-footer">
-      <span>Portland controlled alpha. Plans use demonstration data and provider handoffs.</span>
+      {!compact && <span>Portland controlled alpha. Plans use demonstration data and provider handoffs.</span>}
       <nav aria-label="Alpha information">
         <a href="privacy.html">Privacy</a>
         <a href="terms.html">Terms</a>
@@ -1190,6 +1314,7 @@ function IntakeWizard({
     .split(',')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean)
+  const durationIndex = Math.max(0, durationOptions.findIndex((option) => option.mode === intake.endMode))
 
   useEffect(() => {
     onStepChange(step)
@@ -1362,20 +1487,30 @@ function IntakeWizard({
               </button>
             ))}
           </div>
-          <div className="segmented three-up" role="radiogroup" aria-label="Date duration">
-            {durationOptions.map(([label, mode, minutes]) => (
-              <button
-                type="button"
-                role="radio"
-                key={label}
-                className={intake.endMode === mode ? 'active' : ''}
-                aria-checked={intake.endMode === mode}
-                onClick={() => applyDuration(mode, minutes)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <label className="duration-control">
+            <span className="duration-heading">
+              <strong>Duration</strong>
+              <output>{durationOptions[durationIndex].label}</output>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="1"
+              value={durationIndex}
+              aria-label="Date duration"
+              aria-valuetext={durationOptions[durationIndex].label}
+              onChange={(event) => {
+                const setting = durationSettingFor(Number(event.target.value))
+                applyDuration(setting.mode, setting.minutes)
+              }}
+            />
+            <span className="duration-scale" aria-hidden="true">
+              {durationOptions.map((option, index) => (
+                <span className={durationIndex === index ? 'active' : ''} key={option.label}>{option.label}</span>
+              ))}
+            </span>
+          </label>
           <button type="button" className="ghost wide" onClick={() => setCustomDateTime((current) => !current)}>
             {customDateTime ? 'Hide exact date/time' : 'Pick exact date/time'}
           </button>
@@ -1518,23 +1653,9 @@ function IntakeWizard({
                 <small>Use exact control when the presets do not fit.</small>
               </button>
             </div>
-            <div className="segmented two-up budget-basis" role="radiogroup" aria-label="Budget basis">
-              {(['total', 'per_person'] as Intake['budgetMode'][]).map((mode) => (
-                <button
-                  type="button"
-                  role="radio"
-                  key={mode}
-                  className={intake.budgetMode === mode ? 'active' : ''}
-                  aria-checked={intake.budgetMode === mode}
-                  onClick={() => onChange('budgetMode', mode)}
-                >
-                  {mode === 'total' ? 'Whole date' : 'Per person'}
-                </button>
-              ))}
-            </div>
             {customBudget && (
               <label className="custom-budget-control">
-                Plan around: up to {formatMoney(intake.budgetMax)} {intake.budgetMode === 'total' ? 'total' : 'per person'}
+                Plan around: up to {formatMoney(intake.budgetMax)} total for the date
                 <input
                   type="range"
                   min="20"
@@ -1794,7 +1915,7 @@ function guidanceForStep(step: number, intake: Intake) {
     {
       title: 'Budget stays private.',
       body: 'Choose a planning range. LumaDate never shows the budget to your date.',
-      tip: `${formatMoney(intake.budgetMax)} ${intake.budgetMode === 'total' ? 'total' : 'per person'} selected.`,
+      tip: `${formatMoney(intake.budgetMax)} total for the date selected.`,
     },
     {
       title: 'One clue is enough.',
@@ -1841,7 +1962,7 @@ function GuidanceCard({ step, intake }: { step: number; intake: Intake }) {
 function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step: number) => void }) {
   const reviewRows = [
     ['Where', 0, `${meetupStyleLabels[intake.meetupStyle]} by ${intake.transportMode} in ${intake.dateArea}.`],
-    ['Time', 1, `${dateStageLabels[intake.dateStage]} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(intake.dateStart, 0)} with a ${endModeLabels[intake.endMode]} finish.`],
+    ['Time', 1, `${dateStageLabels[intake.dateStage]} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(intake.dateStart, 0)} with ${durationSummary(intake)} planned.`],
     ['Vibe', 2, `${intake.moodTypes.join(', ') || 'Flexible'} with ${intake.activityTypes.slice(0, 4).map(cleanLabel).join(', ')}.`],
     ['Budget', 3, budgetSummary(intake)],
     ['Food', 3, `${intake.foodWanted === 'no' ? 'No food needed' : `Food: ${intake.cuisineLikes || 'open'}`}; ${alcoholLabels[intake.alcoholPreference]}.`],
@@ -1876,102 +1997,102 @@ function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step:
 function ResultsPanel({
   rankedPlans,
   activeId,
-  onSelect,
-  onConfirm,
+  venuesByPlan,
+  selectedVenueByPlan,
+  saved,
+  onOpen,
   onSave,
-  isSaved,
-  venueSuggestions,
-  planningArea,
-  selectedVenueId,
-  onSelectVenue,
+  onAdjust,
 }: {
   rankedPlans: RankedPlan[]
   activeId: string
-  onSelect: (id: string) => void
-  onConfirm: () => void
-  onSave: () => void
-  isSaved: boolean
-  venueSuggestions: CuratedVenueMatch[]
-  planningArea: string
-  selectedVenueId: string
-  onSelectVenue: (id: string) => void
+  venuesByPlan: Record<string, CuratedVenueMatch[]>
+  selectedVenueByPlan: Record<string, string>
+  saved: SavedItinerary[]
+  onOpen: (ranked: RankedPlan) => void
+  onSave: (ranked: RankedPlan) => void
+  onAdjust: (ranked: RankedPlan) => void
 }) {
-  const active = rankedPlans.find((ranked) => ranked.plan.id === activeId) ?? rankedPlans[0]
-
   return (
     <section className="surface">
       <div className="section-heading">
         <span className="eyebrow">Ranked plans</span>
-        <h2>Pick the plan before we build the full itinerary.</h2>
-        <p>Selecting a card only marks it. Use the confirmation button when it feels right.</p>
+        <h2>Three ways the date could go.</h2>
+        <p>Open one, save it for later, or adjust it without changing the other options.</p>
       </div>
-      <div className="alpha-plan-ribbon">Alpha plan · real place suggestions · live availability not checked</div>
+      <div className="alpha-plan-ribbon">Curated Portland suggestions. Verify current hours, routes, prices, and availability.</div>
       <div className="result-list">
-        {rankedPlans.map((ranked, index) => (
-          <button
-            type="button"
-            key={ranked.plan.id}
-            className={activeId === ranked.plan.id ? 'result-card selected' : 'result-card'}
-            aria-pressed={activeId === ranked.plan.id}
-            onClick={() => onSelect(ranked.plan.id)}
-          >
-            <span className="score">#{index + 1} {fitLabel(ranked, index)}</span>
-            <strong>{ranked.plan.title}</strong>
-            <span>{ranked.plan.shortPitch}</span>
-            <span className="place-preview">{placePreview(ranked.plan)}</span>
-            <span className="verification-note">Map and review handoff ready.</span>
-            <span className="mini-meta">
-              {ranked.meetArea} · {formatCostRange(ranked.plan.estimatedCostTotal)} · {formatDuration(ranked.plan.estimatedDurationMinutes)}
-            </span>
-            {activeId === ranked.plan.id && <span className="selected-plan-note">Selected</span>}
-          </button>
-        ))}
-      </div>
-      <CuratedVenuePanel
-        matches={venueSuggestions}
-        planningArea={planningArea}
-        selectedVenueId={selectedVenueId}
-        onSelect={onSelectVenue}
-      />
-      <div className="confirm-plan-bar">
-        <div>
-          <strong>{active?.plan.title}</strong>
-          <span>{active ? `${active.meetArea} · ${formatCostRange(active.plan.estimatedCostTotal)}` : 'Choose a plan'}</span>
-        </div>
-        <div className="confirm-plan-actions">
-          <button type="button" className="secondary" onClick={onSave} disabled={!active}>
-            {isSaved ? 'Update saved plan' : 'Save plan'}
-          </button>
-          <button type="button" className="primary" onClick={onConfirm} disabled={!active}>
-            Open selected itinerary
-          </button>
-        </div>
+        {rankedPlans.map((ranked, index) => {
+          const venues = venuesByPlan[ranked.plan.id] ?? []
+          const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id]) ?? venues[0]
+          const isSaved = saved.some((item) => (
+            item.planId === ranked.plan.id && (item.venueId ?? '') === (venue?.venue.id ?? '')
+          ))
+
+          return (
+            <article
+              key={ranked.plan.id}
+              className={activeId === ranked.plan.id ? 'result-card selected' : 'result-card'}
+            >
+              <div className="result-card-heading">
+                <span className="score">#{index + 1} {fitLabel(ranked, index)}</span>
+                {activeId === ranked.plan.id && <span className="selected-plan-note">Most recently opened</span>}
+              </div>
+              <h3>{ranked.plan.title}</h3>
+              <p>{ranked.plan.shortPitch}</p>
+              <dl className="result-meta">
+                <div><dt>Venue</dt><dd>{venue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}</dd></div>
+                <div><dt>Area</dt><dd>{ranked.meetArea}</dd></div>
+                <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
+                <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
+              </dl>
+              <p className="result-reason">{ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
+              <div className="result-card-actions">
+                <button type="button" className="primary" onClick={() => onOpen(ranked)}>Open plan</button>
+                <button type="button" className="secondary" onClick={() => onSave(ranked)}>
+                  {isSaved ? 'Saved for later' : 'Save for later'}
+                </button>
+                <button type="button" className="ghost" onClick={() => onAdjust(ranked)}>Adjust</button>
+              </div>
+            </article>
+          )
+        })}
       </div>
     </section>
   )
 }
 
-function CuratedVenuePanel({
+function VenueReviewPanel({
   matches,
   planningArea,
   selectedVenueId,
   onSelect,
+  onBack,
+  onGoItinerary,
 }: {
   matches: CuratedVenueMatch[]
   planningArea: string
   selectedVenueId: string
   onSelect: (id: string) => void
+  onBack: () => void
+  onGoItinerary: () => void
 }) {
   const hasSameAreaMatch = matches.some(({ venue }) => venue.area === planningArea)
+  const orderedMatches = [...matches].sort((a, b) => {
+    if (a.venue.id === selectedVenueId) return -1
+    if (b.venue.id === selectedVenueId) return 1
+    return 0
+  })
 
   return (
-    <section className="curated-venue-panel" aria-labelledby="curated-venue-title">
-      <div className="section-heading compact-heading">
-        <span className="eyebrow">Curated Portland venue pool</span>
-        <h3 id="curated-venue-title">Real restaurant and café ideas for this brief.</h3>
+    <section className="surface venue-review" aria-labelledby="curated-venue-title">
+      <button type="button" className="ghost venue-back" onClick={onBack}>Back to adjustments</button>
+      <div className="section-heading">
+        <span className="eyebrow">Review or change venue</span>
+        <h2 id="curated-venue-title">Keep the recommended place or choose a nearby fit.</h2>
         <p className="curation-disclaimer">
-          <strong>Static curation only.</strong> Ranked from {recommendablePortlandVenues.length} researched Portland seeds.
-          Hours, menus, prices, and availability are not live.
+          <strong>Static curation.</strong> Ranked from {recommendablePortlandVenues.length} researched Portland venues.
+          Verify current hours, menus, prices, reviews, routes, and availability.
         </p>
         {!hasSameAreaMatch && (
           <p className="venue-coverage-note">
@@ -1980,19 +2101,21 @@ function CuratedVenuePanel({
         )}
       </div>
       {matches.length ? (
-        <div className="curated-venue-grid">
-          {matches.map((match) => (
+        <div className="curated-venue-grid venue-review-grid">
+          {orderedMatches.map((match, index) => (
             <CuratedVenueCard
               key={match.venue.id}
               match={match}
               selected={match.venue.id === selectedVenueId}
               onSelect={onSelect}
+              label={index === 0 ? 'Selected venue' : 'Alternative'}
             />
           ))}
         </div>
       ) : (
         <p className="empty">No curated venue fits every avoid rule. Edit the brief to see safe alternatives.</p>
       )}
+      <button type="button" className="primary wide" onClick={onGoItinerary}>Return to itinerary</button>
     </section>
   )
 }
@@ -2001,10 +2124,12 @@ function CuratedVenueCard({
   match: { venue, reason },
   selected,
   onSelect,
+  label,
 }: {
   match: CuratedVenueMatch
   selected: boolean
   onSelect: (id: string) => void
+  label?: string
 }) {
   const backup = findVenueBackup(venue)
   const pairing = findAreaPairing(venue)
@@ -2015,6 +2140,7 @@ function CuratedVenueCard({
   return (
     <article className={selected ? 'curated-venue-card selected' : 'curated-venue-card'}>
       <div>
+        {label && <span className="venue-card-label">{label}</span>}
         <span className="venue-kind">
           {venue.kind} · {venue.curationTier === 'editorial-consensus'
             ? 'multi-list consensus'
@@ -2058,36 +2184,11 @@ function CuratedVenueCard({
             Official site
           </a>
         )}
+        <a className="ghost link-button" href={venue.reviewUrl} target="_blank" rel="noreferrer">
+          Read current reviews
+        </a>
       </div>
     </article>
-  )
-}
-
-function CuratedItineraryFlex({ match }: { match?: CuratedVenueMatch }) {
-  if (!match) return null
-
-  const { venue, reason } = match
-  const backup = findVenueBackup(venue)
-  const pairing = findAreaPairing(venue)
-
-  return (
-    <section className="curated-itinerary-flex" aria-label="Curated venue flex option">
-      <div>
-        <span className="eyebrow">Selected venue</span>
-        <h3>{venue.name}</h3>
-        <p>{reason}. This replaces the demo food stop in your plan summary only; it is not booked.</p>
-      </div>
-      <div className="curated-flex-details">
-        {backup && <span><strong>Same-area backup</strong>{backup.name}</span>}
-        {pairing && <span><strong>{pairing.kind} pairing</strong>{pairing.name}</span>}
-      </div>
-      <div className="place-actions">
-        <a className="link-button" href={venue.mapsUrl} target="_blank" rel="noreferrer">Open map</a>
-        {venue.websiteUrl && (
-          <a className="ghost link-button" href={venue.websiteUrl} target="_blank" rel="noreferrer">Official site</a>
-        )}
-      </div>
-    </section>
   )
 }
 
@@ -2097,10 +2198,6 @@ function ItineraryPanel({
   onOpenSheet,
   onGoAdjust,
   onCompare,
-  onSave,
-  isSaved,
-  planState,
-  onPlanState,
   inviteDraft,
   adjustmentMessage,
   copied,
@@ -2112,10 +2209,6 @@ function ItineraryPanel({
   onOpenSheet: (sheet: Sheet) => void
   onGoAdjust: () => void
   onCompare: () => void
-  onSave: () => void
-  isSaved: boolean
-  planState: PlanState
-  onPlanState: (state: PlanState) => void
   inviteDraft: string
   adjustmentMessage: string
   copied: string
@@ -2137,31 +2230,15 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
       <PlanSummaryCard
         ranked={ranked}
         intake={intake}
-        planState={planState}
         selectedVenue={selectedVenue}
       />
 
-      <div className="save-plan-banner">
-        <div>
-          <strong>{isSaved ? 'This plan is saved' : 'Want to keep this plan?'}</strong>
-          <span>Stored only in this browser. Find it anytime under Saved.</span>
-        </div>
-        <button type="button" className={isSaved ? 'secondary' : 'primary'} onClick={onSave}>
-          {isSaved ? 'Update saved plan' : 'Save plan'}
-        </button>
+      {adjustmentMessage && <p className="adjustment-banner">{adjustmentMessage}</p>}
+      <div className="itinerary-verification-note">
+        Curated venue and timing estimates are not live. Verify the place, route, hours, and availability before leaving.
       </div>
 
-      {adjustmentMessage && <p className="adjustment-banner">{adjustmentMessage}</p>}
-      <div className="alpha-plan-ribbon">Example estimates · verify route, hours, and availability externally</div>
-
       <div className="timeline">
-        <div className="timeline-row">
-          <time>{ranked.leaveBy.replace('Leave by ', '')}</time>
-          <div>
-            <strong>Example leave time - verify route in Maps</strong>
-            <p>{ranked.leaveBy}. Demo traffic estimate: {ranked.trafficNote}</p>
-          </div>
-        </div>
         {ranked.plan.itinerary.map((step) => (
           <div className="timeline-row" key={`${step.title}-${step.timeOffsetMinutes}`}>
             <time>{offsetTime(intake.dateStart, step.timeOffsetMinutes)}</time>
@@ -2173,20 +2250,19 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
         ))}
       </div>
 
-      <CuratedItineraryFlex match={selectedVenue} />
-
-      <div className="forecast-strip">
-        <span>Demo crowd estimate - not live: {ranked.crowdForecast}</span>
-        <span>{ranked.crowdBackup}</span>
-      </div>
-
       <div className="itinerary-primary-actions">
         <button type="button" className="primary" onClick={() => onCopy('Invite copied', inviteText)}>
           {copied === 'Invite copied' ? 'Copied' : 'Copy invite'}
         </button>
-        <button type="button" className="secondary" onClick={() => onOpenSheet('booking')}>
-          Check hours & availability externally ↗
-        </button>
+        {selectedVenue ? (
+          <a className="secondary link-button" href={selectedVenue.venue.mapsUrl} target="_blank" rel="noreferrer">
+            Open map / verify place
+          </a>
+        ) : (
+          <button type="button" className="secondary" onClick={() => onOpenSheet('booking')}>
+            Open map / verify place
+          </button>
+        )}
         {intake.safetyShareEnabled && (
           <button type="button" className="secondary" onClick={() => onOpenSheet('safety')}>
             Safety share
@@ -2194,35 +2270,17 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
         )}
       </div>
 
-      <details className="itinerary-secondary">
-        <summary>More plan details and tools</summary>
-        <MeetAreaMapCard ranked={ranked} intake={intake} />
-        <IntegrationReadinessCard />
-        <PlacePanel places={ranked.plan.places ?? []} ranked={ranked} intake={intake} />
-        <div className="reason-list">
-          {ranked.reasons.map((reason) => <p key={reason}>{reason}</p>)}
-          {ranked.warnings.map((warning) => <p className="warning" key={warning}>{warning}</p>)}
-        </div>
-        <div className="state-row" role="radiogroup" aria-label="Plan states">
-          {planStates.map((state) => (
-            <button
-              type="button"
-              role="radio"
-              key={state}
-              className={planState === state ? 'state-option active' : 'state-option'}
-              aria-checked={planState === state}
-              onClick={() => onPlanState(state)}
-            >
-              {state}
-            </button>
-          ))}
-        </div>
+      <div className="itinerary-secondary-actions">
+        <button type="button" className="secondary" onClick={onGoAdjust}>Adjust plan</button>
+        <button type="button" className="ghost" onClick={onCompare}>Compare plans</button>
+      </div>
+
+      <details className="itinerary-secondary compact-tools">
+        <summary>More tools</summary>
         <div className="secondary-tool-grid">
-          <button type="button" className="secondary" onClick={() => onOpenSheet('invite')}>Edit invite starter</button>
-          <button type="button" className="secondary" onClick={onCompare}>Compare other options</button>
-          <button type="button" className="secondary" onClick={onGoAdjust}>Adjust plan</button>
-          <button type="button" className="secondary" onClick={() => onOpenSheet('reminders')}>Set reminders</button>
-          <button type="button" className="secondary" onClick={() => onOpenSheet('late')}>Running late</button>
+          <button type="button" className="ghost" onClick={() => onOpenSheet('invite')}>Edit invite</button>
+          <button type="button" className="ghost" onClick={() => onOpenSheet('reminders')}>Reminders</button>
+          <button type="button" className="ghost" onClick={() => onOpenSheet('late')}>Running late</button>
         </div>
       </details>
     </section>
@@ -2232,139 +2290,32 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
 function PlanSummaryCard({
   ranked,
   intake,
-  planState,
   selectedVenue,
 }: {
   ranked: RankedPlan
   intake: Intake
-  planState: PlanState
   selectedVenue?: CuratedVenueMatch
 }) {
   return (
     <section className="plan-summary" aria-label="Plan summary">
       <div className="summary-topline">
-        <span className="state-chip">{planState}</span>
+        <span>Selected plan</span>
         <span>{bookingLabels[ranked.plan.bookingType]}</span>
       </div>
       <h2>{ranked.plan.title}</h2>
       <p>{ranked.plan.shortPitch}</p>
       <div className="summary-grid">
-        <span><strong>When</strong>{formatPlanDate(intake.dateStart)} · {offsetTime(intake.dateStart, 0)}</span>
-        <span><strong>Meet</strong>{ranked.meetArea}</span>
-        <span><strong>Travel</strong>Example: {ranked.leaveBy.toLowerCase()} · verify in Maps</span>
-        <span><strong>Budget</strong>{formatCostRange(ranked.plan.estimatedCostTotal)}</span>
-        <span><strong>Vibe</strong>{ranked.plan.tags.slice(0, 2).join(' + ')}</span>
-        <span><strong>Backup</strong>{ranked.plan.backupOptions[0] ?? 'nearby cafe'}</span>
+        <span><strong>Date</strong>{formatPlanDate(intake.dateStart)} · {offsetTime(intake.dateStart, 0)}</span>
         <span><strong>Venue</strong>{selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}</span>
+        <span><strong>Area</strong>{ranked.meetArea}</span>
+        <span><strong>Duration</strong>{formatDuration(ranked.plan.estimatedDurationMinutes)}</span>
+        <span><strong>Cost</strong>{formatCostRange(ranked.plan.estimatedCostTotal)}</span>
       </div>
       <div className="summary-note">
-        <strong>Plan note</strong>
-        <span>{dressWeatherNote(ranked)} Availability is external; verify hours, reviews, and provider options before leaving.</span>
+        <strong>Verify before relying on this plan</strong>
+        <span>Check current venue details, route, and availability using the external links.</span>
       </div>
     </section>
-  )
-}
-
-function MeetAreaMapCard({ ranked, intake }: { ranked: RankedPlan; intake: Intake }) {
-  return (
-    <section className="meet-map-card" aria-label="Public meet area map preview">
-      <div className="mock-map">
-        <span className="map-pin start">You</span>
-        <span className="map-pin meet">Meet</span>
-        <span className="map-pin backup">Backup</span>
-        <span className="route-line"></span>
-      </div>
-      <div>
-        <span className="eyebrow">Public meet area</span>
-        <h3>{ranked.meetArea}</h3>
-        <p>
-          {meetingLabels[intake.meetingMode]}. Private origin addresses stay hidden in invite and safety share.
-          Use the public meet point first, then verify park/weather and restaurant availability before leaving.
-        </p>
-      </div>
-    </section>
-  )
-}
-
-function IntegrationReadinessCard() {
-  return (
-    <section className="integration-card" aria-label="Map and data readiness">
-      <div>
-        <span className="eyebrow">Plan check</span>
-        <h3>Portland map links and planning estimates are included.</h3>
-        <p>
-          Controlled alpha data is shown here. Verify current hours, reviews, route, and availability before leaving.
-        </p>
-      </div>
-      <div className="integration-pill-grid" aria-label="Integration status">
-        <span>Map links ready</span>
-        <span>External place checks</span>
-        <span>Demo weather placeholder</span>
-        <span>Demo crowd estimate - not live</span>
-      </div>
-    </section>
-  )
-}
-
-function PlacePanel({ places, ranked, intake }: { places: Place[]; ranked: RankedPlan; intake: Intake }) {
-  if (!places.length) return null
-  return (
-    <div className="place-panel" aria-label="Real place recommendations">
-      <div className="section-heading compact-heading">
-        <span className="eyebrow">Real places</span>
-        <h3>Portland anchors with map and review handoffs.</h3>
-        <p>
-          Portland place links are ready to inspect. Verify current hours, availability,
-          reviews, photos, and route details before leaving.
-        </p>
-      </div>
-      <div className="place-list">
-        {places.map((place, index) => {
-          const signals = buildMockStopSignals({
-            place,
-            index,
-            dateStart: intake.dateStart,
-            bookingType: ranked.plan.bookingType,
-            crowdComfort: intake.crowdComfort,
-          })
-
-          return (
-          <article className="place-card" key={`${place.name}-${place.category}`}>
-            <div>
-              <strong>{place.name}</strong>
-              <span>{place.category} · {place.neighborhood} · {place.priceLevel}</span>
-            </div>
-            <p>{place.why}</p>
-            <div className="place-signal-grid">
-              <span>
-                <strong>Demo weather placeholder</strong>
-                {signals.weather.summary}
-              </span>
-              <span>
-                <strong>Demo crowd estimate - not live</strong>
-                {signals.crowd.label}
-              </span>
-              <span>
-                <strong>Example route leg - verify in Maps</strong>
-                  {signals.routeLeg.estimatedMinutes} min estimate
-              </span>
-            </div>
-            <small>{place.ratingSummary}</small>
-            <small>{signals.crowd.verificationCopy}</small>
-            {place.warning && <small className="place-warning">{place.warning}</small>}
-            <div className="place-actions">
-              <a className="link-button" href={place.mapsLink} target="_blank" rel="noreferrer">
-                Open map
-              </a>
-              <a className="ghost link-button" href={place.reviewLink} target="_blank" rel="noreferrer">
-                Verify reviews
-              </a>
-            </div>
-          </article>
-          )
-        })}
-      </div>
-    </div>
   )
 }
 
@@ -2375,6 +2326,8 @@ function AdjustPanel({
   onAdjust,
   onSelect,
   onGoItinerary,
+  onReviewVenue,
+  selectedVenue,
   onOpenLate,
   onOpenExit,
 }: {
@@ -2384,6 +2337,8 @@ function AdjustPanel({
   onAdjust: (message: string) => void
   onSelect: (planId: string) => void
   onGoItinerary: () => void
+  onReviewVenue: () => void
+  selectedVenue?: CuratedVenueMatch
   onOpenLate: () => void
   onOpenExit: () => void
 }) {
@@ -2425,6 +2380,14 @@ function AdjustPanel({
         <span className="eyebrow">Preview changes</span>
         <h2>Preview an adjusted plan, then keep it or choose another change.</h2>
       </div>
+      <section className="adjust-venue-entry" aria-label="Selected venue">
+        <div>
+          <span className="eyebrow">Venue</span>
+          <h3>{selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}</h3>
+          <p>{selectedVenue?.reason ?? 'Automatically chosen to fit this plan.'}</p>
+        </div>
+        <button type="button" className="secondary" onClick={onReviewVenue}>Review or change venue</button>
+      </section>
       <div className="adjust-grid">
         {adjustments.map(([title, preview, appliedCopy]) => {
           const selected = message.startsWith(`Preview ready - ${title}:`)
@@ -2599,7 +2562,7 @@ function SavedSheet({
         <h2>Your shortlist and settings.</h2>
       </div>
       {saved.length === 0 ? (
-        <p className="empty">No saved plans yet. Choose Save plan from a ranked option or its itinerary.</p>
+        <p className="empty">No saved plans yet. Use Save for later on any ranked plan.</p>
       ) : (
         <div className="saved-list">
           {saved.map((item) => (
