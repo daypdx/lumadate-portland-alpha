@@ -30,14 +30,16 @@ type ProviderAction = {
 }
 
 type PlanStep = {
+  id: string
   timeOffsetMinutes: number
   title: string
   description: string
   canReplace: boolean
-  placeIndex?: number
+  placeId?: string
 }
 
 type Place = {
+  id: string
   name: string
   category: string
   neighborhood: string
@@ -55,6 +57,8 @@ export type DatePlan = {
   shortPitch: string
   neighborhoods: string[]
   city: string
+  featuredPlaceId: string
+  replaceablePlaceId?: string
   estimatedCostTotal: number
   estimatedCostLevel: 0 | 1 | 2 | 3 | 4
   estimatedDurationMinutes: number
@@ -116,6 +120,21 @@ export type RankedPlan = {
   leaveBy: string
   crowdForecast: string
   crowdBackup: string
+  areaMatch: boolean
+  budgetFits: boolean
+  estimatedCostHigh: number
+}
+
+export type CanonicalPlanStop = PlanStep & {
+  place?: Place
+}
+
+export type CanonicalPlan = {
+  planId: string
+  title: string
+  meetArea: string
+  anchorPlace?: Place
+  stops: CanonicalPlanStop[]
 }
 
 type ReminderSettings = {
@@ -133,6 +152,9 @@ type SavedItinerary = {
   meetArea: string
   venueId?: string
   venueName?: string
+  stopIds: string[]
+  anchorName?: string
+  anchorMapsLink?: string
   savedAt: string
 }
 
@@ -418,6 +440,7 @@ const stopWords = new Set([
   'have',
   'like',
   'likes',
+  'long',
   'place',
   'places',
   'said',
@@ -459,9 +482,15 @@ function formatMoney(amount: number): string {
   return `$${amount}`
 }
 
+export function estimatedCostRange(amount: number): { low: number; high: number } {
+  return {
+    low: Math.max(20, Math.floor(amount / 10) * 10),
+    high: Math.ceil((amount * 1.5) / 10) * 10,
+  }
+}
+
 function formatCostRange(amount: number): string {
-  const low = Math.max(20, Math.floor(amount / 10) * 10)
-  const high = Math.ceil((amount * 1.5) / 10) * 10
+  const { low, high } = estimatedCostRange(amount)
   return `$${low}-$${high} example total`
 }
 
@@ -488,8 +517,9 @@ function preferredVenueKinds(plan: DatePlan): CuratedVenueKind[] {
 
 function curatedVenuesForPlan(intake: Intake, plan: DatePlan, limit = 4): CuratedVenueMatch[] {
   const preferredKinds = preferredVenueKinds(plan)
+  const planArea = plan.neighborhoods[0] ?? intake.dateArea
   const matches = recommendCuratedVenues({
-    area: intake.dateArea,
+    area: planArea,
     categories: [...intake.activityTypes, ...intake.moodTypes, ...plan.tags, ...plan.interestKeywords],
     budgetMax: intake.budgetMax,
     cues: [
@@ -503,8 +533,18 @@ function curatedVenuesForPlan(intake: Intake, plan: DatePlan, limit = 4): Curate
   }, recommendablePortlandVenues.length)
   const preferred = matches.filter(({ venue }) => preferredKinds.includes(venue.kind))
   const remaining = matches.filter(({ venue }) => !preferredKinds.includes(venue.kind))
+  const sameAreaPreferred = preferred.filter(({ venue }) => areaLabelsMatch(planArea, venue.area))
+  const sameAreaRemaining = remaining.filter(({ venue }) => areaLabelsMatch(planArea, venue.area))
+  const ordered = [...sameAreaPreferred, ...preferred, ...sameAreaRemaining, ...remaining]
+    .filter((match, index, items) => items.findIndex((item) => item.venue.id === match.venue.id) === index)
 
-  return [...preferred, ...remaining].slice(0, limit)
+  return ordered.slice(0, limit)
+}
+
+function automaticVenueForPlan(plan: DatePlan, matches: CuratedVenueMatch[]): CuratedVenueMatch | undefined {
+  const kinds = preferredVenueKinds(plan)
+  const planArea = plan.neighborhoods[0] ?? ''
+  return matches.find(({ venue }) => kinds.includes(venue.kind) && areaLabelsMatch(planArea, venue.area))
 }
 
 function cleanLabel(value: string): string {
@@ -522,16 +562,77 @@ export function looksLikeStreetAddress(value: string): boolean {
 }
 
 function primaryAnchor(plan: DatePlan, fallback = 'Portland area'): string {
-  return plan.places?.find((place) => /dinner|restaurant|market|food/i.test(place.category))?.name
+  return plan.places?.find((place) => place.id === plan.featuredPlaceId)?.name
     ?? plan.places?.[0]?.name
     ?? plan.neighborhoods[0]
     ?? fallback
+}
+
+function normalizeArea(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function areaLabelsMatch(left: string, right: string): boolean {
+  const a = normalizeArea(left)
+  const b = normalizeArea(right)
+  if (!a || !b) return false
+  if (a === b) return true
+  if (a === 'portland' || a === 'portland metro' || b === 'portland' || b === 'portland metro') return false
+  return a.includes(b) || b.includes(a)
+}
+
+export function planMatchesArea(intake: Intake, plan: DatePlan): boolean {
+  return plan.neighborhoods.some((area) => areaLabelsMatch(intake.dateArea, area))
+}
+
+function curatedVenuePlace(match: CuratedVenueMatch): Place {
+  const { venue } = match
+  return {
+    id: venue.id,
+    name: venue.name,
+    category: venue.kind,
+    neighborhood: `${venue.neighborhood}, ${venue.area}`,
+    priceLevel: '$'.repeat(venue.priceTierEstimate),
+    ratingSummary: 'Current ratings and review counts are not stored. Read current reviews before relying on this venue.',
+    mapsLink: venue.mapsUrl,
+    reviewLink: venue.reviewUrl,
+    why: match.reason,
+    warning: venue.verificationCaution,
+  }
+}
+
+export function canonicalPlanFor(
+  ranked: RankedPlan,
+  intake: Intake,
+  selectedVenue?: CuratedVenueMatch,
+): CanonicalPlan {
+  const places = new Map((ranked.plan.places ?? []).map((place) => [place.id, place]))
+  const replacement = selectedVenue ? curatedVenuePlace(selectedVenue) : undefined
+  const stops = ranked.plan.itinerary.map((step) => ({
+    ...step,
+    place: replacement && step.placeId === ranked.plan.replaceablePlaceId
+      ? replacement
+      : step.placeId ? places.get(step.placeId) : undefined,
+  }))
+  const featuredIsReplaceable = ranked.plan.featuredPlaceId === ranked.plan.replaceablePlaceId
+  const anchorPlace = featuredIsReplaceable && replacement
+    ? replacement
+    : places.get(ranked.plan.featuredPlaceId) ?? stops.find((stop) => stop.place)?.place
+
+  return {
+    planId: ranked.plan.id,
+    title: ranked.plan.title,
+    meetArea: meetAreaFor(intake, ranked.plan),
+    anchorPlace,
+    stops,
+  }
 }
 
 export function trustedContactMessage(
   intent: TrustedContactIntent,
   ranked: RankedPlan,
   selectedVenue?: CuratedVenueMatch,
+  intake?: Intake,
 ): string {
   if (intent === 'call_five') {
     return 'Please call me in 5 minutes and say you need me. I want an easy exit from a date.'
@@ -540,8 +641,10 @@ export function trustedContactMessage(
     return 'Please call me now. I want to leave this date. Stay on the phone while I get to my ride.'
   }
 
-  const venue = selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)
-  return `I need help leaving now. I'm at ${venue}, ${ranked.meetArea}. Call me and stay on the phone. If I do not answer, follow our safety plan.`
+  const canonical = intake ? canonicalPlanFor(ranked, intake, selectedVenue) : undefined
+  const venue = canonical?.anchorPlace?.name ?? selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)
+  const meetArea = canonical?.meetArea ?? ranked.meetArea
+  return `I need help leaving now. I'm at ${venue}, ${meetArea}. Call me and stay on the phone. If I do not answer, follow our safety plan.`
 }
 
 function providerModeLabel(mode: ProviderMode): string {
@@ -565,7 +668,10 @@ function budgetSummary(intake: Intake): string {
 }
 
 function fitLabel(ranked: RankedPlan, index: number): string {
-  if (index === 0) return 'Best fit'
+  if (index === 0 && ranked.areaMatch && ranked.budgetFits) return 'Best fit'
+  if (index === 0) return 'Closest available'
+  if (!ranked.areaMatch) return 'Different-area alternative'
+  if (!ranked.budgetFits) return 'Over-budget alternative'
   if (ranked.plan.estimatedCostTotal <= 75) return 'Budget-friendly backup'
   if (ranked.plan.tags.some((tag) => /quiet|coffee|walk|park/i.test(tag))) return 'Low-key backup'
   if (ranked.plan.tags.some((tag) => /comedy|music|social/i.test(tag))) return 'Social option'
@@ -576,6 +682,29 @@ function offsetTime(start: string, offsetMinutes: number): string {
   const date = new Date(start)
   date.setMinutes(date.getMinutes() + offsetMinutes)
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+export function inviteTextFor(
+  ranked: RankedPlan,
+  intake: Intake,
+  inviteDraft: string,
+  selectedVenue?: CuratedVenueMatch,
+): string {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const stops = canonical.stops
+    .map((stop) => `${offsetTime(intake.dateStart, stop.timeOffsetMinutes)} - ${stop.title}${stop.place ? ` at ${stop.place.name}` : ''}`)
+    .join('\n')
+
+  return `${inviteDraft}
+
+Plan: ${canonical.title}
+Public meet area: ${canonical.meetArea}
+Date: ${formatPlanDate(intake.dateStart)}
+
+Stops:
+${stops}
+
+Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
 }
 
 function toDateTimeLocal(date: Date): string {
@@ -654,7 +783,6 @@ export function rankPlans(intake: Intake): RankedPlan[] {
   const cuisineWords = extractKeywords(intake.cuisineLikes)
   const avoidWords = extractKeywords(intake.mustAvoid)
   const preferenceWords = [...intake.activityTypes, ...intake.moodTypes].flatMap((value) => extractKeywords(value))
-  const areaWords = extractKeywords(intake.dateArea)
   const dietaryNeeds = intake.dietaryLimits.trim()
 
   return plans
@@ -675,7 +803,9 @@ export function rankPlans(intake: Intake): RankedPlan[] {
       const cuisineMatches = cuisineWords.filter((word) => searchable.includes(word))
       const avoidMatches = avoidWords.filter((word) => searchable.includes(word))
       const preferenceMatches = preferenceWords.filter((word) => searchable.includes(word))
-      const areaMatches = areaWords.filter((word) => searchable.includes(word))
+      const areaMatch = planMatchesArea(intake, plan)
+      const estimatedCostHigh = estimatedCostRange(plan.estimatedCostTotal).high
+      const budgetFits = estimatedCostHigh <= intake.budgetMax
       const hasFood = /food|dinner|restaurant|sushi|coffee|dessert|mocktail|market/.test(searchable)
       const isQuiet = /quiet|low pressure|bookstore|coffee|park|walkable/.test(searchable)
       const isHighEnergy = /comedy|music|social|class|adventurous|tickets/.test(searchable)
@@ -696,16 +826,20 @@ export function rankPlans(intake: Intake): RankedPlan[] {
         score += Math.min(18, preferenceMatches.length * 4)
         reasons.push(`Matches your selected vibe: ${preferenceMatches.slice(0, 3).join(', ')}.`)
       }
-      if (areaMatches.length) {
-        score += 8
+      if (areaMatch) {
+        score += 28
         reasons.push('Fits the Portland area you selected.')
+      } else {
+        score -= 30
+        warnings.push(`Different area: this plan uses ${plan.neighborhoods[0] ?? 'another Portland area'}, not ${intake.dateArea}.`)
       }
-      if (plan.estimatedCostTotal <= intake.budgetMax) {
-        score += 12
+      if (budgetFits) {
+        score += 18
         reasons.push(`Fits your ${formatMoney(intake.budgetMax)} total-date budget.`)
       } else {
-        score -= 20
-        warnings.push(`Estimated ${formatMoney(plan.estimatedCostTotal)}, above your budget.`)
+        const overBy = estimatedCostHigh - intake.budgetMax
+        score -= 35
+        warnings.push(`Estimated range reaches ${formatMoney(estimatedCostHigh)}, up to ${formatMoney(overBy)} over budget.`)
       }
       if (intake.endMode === 'open_ended' || plan.estimatedDurationMinutes <= 240) {
         score += 8
@@ -768,9 +902,19 @@ export function rankPlans(intake: Intake): RankedPlan[] {
         leaveBy: leaveByTime(intake.dateStart),
         crowdForecast: crowdLabels[index % crowdLabels.length],
         crowdBackup: `Backup if crowded: ${plan.backupOptions[0] ?? 'nearby quiet cafe'}.`,
+        areaMatch,
+        budgetFits,
+        estimatedCostHigh,
       }
     })
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      const aEligible = Number(a.areaMatch && a.budgetFits)
+      const bEligible = Number(b.areaMatch && b.budgetFits)
+      if (aEligible !== bEligible) return bEligible - aEligible
+      if (a.areaMatch !== b.areaMatch) return Number(b.areaMatch) - Number(a.areaMatch)
+      if (a.budgetFits !== b.budgetFits) return Number(b.budgetFits) - Number(a.budgetFits)
+      return b.score - a.score
+    })
     .slice(0, 3)
 }
 
@@ -802,7 +946,7 @@ function App() {
   ) as Record<string, CuratedVenueMatch[]>, [intake, rankedPlans])
   const venueSuggestions = venueSuggestionsByPlan[active.plan.id] ?? []
   const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
-    ?? venueSuggestions[0]
+    ?? automaticVenueForPlan(active.plan, venueSuggestions)
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -884,28 +1028,37 @@ function App() {
 
   function showToast(label: string) {
     setCopied(label)
-    window.setTimeout(() => setCopied(''), 2600)
+    window.setTimeout(() => setCopied(''), 6000)
   }
 
   function selectedVenueFor(ranked: RankedPlan): CuratedVenueMatch | undefined {
     const matches = venueSuggestionsByPlan[ranked.plan.id] ?? []
-    return matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id]) ?? matches[0]
+    return matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id])
+      ?? automaticVenueForPlan(ranked.plan, matches)
   }
 
   function savePlan(ranked: RankedPlan) {
     const venueMatch = selectedVenueFor(ranked)
     const wasAlreadySaved = saved.some((item) => item.planId === ranked.plan.id)
+    if (wasAlreadySaved) {
+      showToast(`${ranked.plan.title} is already saved`)
+      return
+    }
+    const canonical = canonicalPlanFor(ranked, intake, venueMatch)
     const record: SavedItinerary = {
       id: `${ranked.plan.id}-${Date.now()}`,
       planId: ranked.plan.id,
       title: ranked.plan.title,
-      meetArea: ranked.meetArea,
+      meetArea: canonical.meetArea,
       venueId: venueMatch?.venue.id,
       venueName: venueMatch?.venue.name,
+      stopIds: canonical.stops.map((stop) => stop.id),
+      anchorName: canonical.anchorPlace?.name,
+      anchorMapsLink: canonical.anchorPlace?.mapsLink,
       savedAt: new Date().toISOString(),
     }
     setSaved((current) => [record, ...current.filter((item) => item.planId !== ranked.plan.id)])
-    showToast(wasAlreadySaved ? `${ranked.plan.title} updated` : `${ranked.plan.title} saved for later`)
+    showToast(`${ranked.plan.title} saved for later`)
   }
 
   function showItinerary() {
@@ -933,9 +1086,19 @@ function App() {
   function selectVenue(venueId: string) {
     const match = venueSuggestions.find(({ venue }) => venue.id === venueId)
     if (!match) return
+    const canonical = canonicalPlanFor(active, intake, match)
     setSelectedVenueByPlan((current) => ({ ...current, [active.plan.id]: venueId }))
     setSaved((current) => current.map((item) => item.planId === active.plan.id
-      ? { ...item, venueId, venueName: match.venue.name, savedAt: new Date().toISOString() }
+      ? {
+        ...item,
+        meetArea: canonical.meetArea,
+        venueId,
+        venueName: match.venue.name,
+        stopIds: canonical.stops.map((stop) => stop.id),
+        anchorName: canonical.anchorPlace?.name,
+        anchorMapsLink: canonical.anchorPlace?.mapsLink,
+        savedAt: new Date().toISOString(),
+      }
       : item))
     showToast(`Venue changed to ${match.venue.name}`)
   }
@@ -1002,21 +1165,21 @@ function App() {
     return (
       <main className="welcome">
         <section className="welcome-panel">
-          <span className="alpha-badge">Portland Alpha</span>
+          <span className="alpha-badge">Portland controlled alpha</span>
           <div className="brand-lockup">
             <span className="brand-mark image-mark">
               <img src={lumaDateEmblem} alt="" />
             </span>
             <span>LumaDate</span>
           </div>
-          <h1>Plan the date without overthinking it.</h1>
-          <p>Tell us the vibe, timing, and Portland area. We will turn it into three thoughtful plans.</p>
+          <h1>A Portland date plan you can actually use tonight.</h1>
+          <p>Choose the vibe, neighborhood, and budget. Get three public, privacy-aware itineraries with real place links, then verify and send the one you like.</p>
           <div className="welcome-actions">
             <button type="button" className="primary" onClick={(event) => requestEntry('personal', event.currentTarget)}>
-              Build my Portland plan
+              Build my date plan
             </button>
             <button type="button" className="secondary" onClick={(event) => requestEntry('demo', event.currentTarget)}>
-              Preview an example
+              See a Portland example
             </button>
           </div>
           <AlphaFooter compact />
@@ -1077,6 +1240,7 @@ function App() {
           {tab === 'options' && (
             <ResultsPanel
               rankedPlans={rankedPlans}
+              intake={intake}
               activeId={active.plan.id}
               venuesByPlan={venueSuggestionsByPlan}
               selectedVenueByPlan={selectedVenueByPlan}
@@ -1126,7 +1290,7 @@ function App() {
           {tab === 'venue' && (
             <VenueReviewPanel
               matches={venueSuggestions}
-              planningArea={intake.dateArea}
+              planningArea={active.plan.neighborhoods[0] ?? intake.dateArea}
               selectedVenueId={selectedVenueMatch?.venue.id ?? ''}
               onSelect={selectVenue}
               onBack={() => setTab('adjust')}
@@ -1137,6 +1301,8 @@ function App() {
           {tab === 'alerts' && (
             <AlertsPanel
               ranked={active}
+              intake={intake}
+              selectedVenue={selectedVenueMatch}
               reminders={reminders}
               onOpenReminders={() => setSheet('reminders')}
               onOpenAssistant={() => setSheet('assistant')}
@@ -1145,7 +1311,7 @@ function App() {
           )}
 
           {tab === 'safety' && (
-            <SafetyPanel ranked={active} intake={intake} copied={copied} onCopy={copyText} onOpenExit={() => setSheet('exit')} />
+            <SafetyPanel ranked={active} intake={intake} selectedVenue={selectedVenueMatch} copied={copied} onCopy={copyText} onOpenExit={() => setSheet('exit')} />
           )}
         </div>
 
@@ -1182,15 +1348,19 @@ function App() {
         </nav>
       )}
 
-      {copied && <div className="toast" role="status">{copied}</div>}
+      <div className="toast-region" role="status" aria-live="polite" aria-atomic="true">
+        {copied && <div className="toast">{copied}</div>}
+      </div>
 
-      {sheet === 'booking' && <BookingSheet ranked={active} onClose={() => setSheet(null)} />}
+      {sheet === 'booking' && <BookingSheet ranked={active} intake={intake} selectedVenue={selectedVenueMatch} onClose={() => setSheet(null)} />}
       {sheet === 'reminders' && (
         <ReminderSheet reminders={reminders} onChange={setReminders} onClose={() => setSheet(null)} />
       )}
       {sheet === 'late' && (
         <LateSheet
           ranked={active}
+          intake={intake}
+          selectedVenue={selectedVenueMatch}
           minutes={lateMinutes}
           onMinutes={setLateMinutes}
           copied={copied}
@@ -1199,12 +1369,13 @@ function App() {
         />
       )}
       {sheet === 'safety' && (
-        <SafetySheet ranked={active} intake={intake} copied={copied} onCopy={copyText} onClose={() => setSheet(null)} />
+        <SafetySheet ranked={active} intake={intake} selectedVenue={selectedVenueMatch} copied={copied} onCopy={copyText} onClose={() => setSheet(null)} />
       )}
       {sheet === 'invite' && (
         <InviteSheet
           ranked={active}
           intake={intake}
+          selectedVenue={selectedVenueMatch}
           inviteDraft={inviteDraft}
           onInviteDraft={setInviteDraft}
           copied={copied}
@@ -1229,11 +1400,12 @@ function App() {
         />
       )}
       {sheet === 'assistant' && (
-        <AssistantSheet ranked={active} intake={intake} onClose={() => setSheet(null)} />
+        <AssistantSheet ranked={active} intake={intake} selectedVenue={selectedVenueMatch} onClose={() => setSheet(null)} />
       )}
       {sheet === 'exit' && (
         <ExitPlanSheet
           ranked={active}
+          intake={intake}
           selectedVenue={selectedVenueMatch}
           copied={copied}
           onCopy={copyText}
@@ -1243,6 +1415,36 @@ function App() {
       <AlphaFooter />
     </main>
   )
+}
+
+function useModalBackgroundInert(backdropRef: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const backdrop = backdropRef.current
+    const parent = backdrop?.parentElement
+    if (!backdrop || !parent) return
+
+    const siblings = [...parent.children].filter((child): child is HTMLElement => (
+      child instanceof HTMLElement && child !== backdrop
+    ))
+    const previous = siblings.map((element) => ({
+      element,
+      inert: element.inert,
+      ariaHidden: element.getAttribute('aria-hidden'),
+    }))
+
+    siblings.forEach((element) => {
+      element.inert = true
+      element.setAttribute('aria-hidden', 'true')
+    })
+
+    return () => {
+      previous.forEach(({ element, inert, ariaHidden }) => {
+        element.inert = inert
+        if (ariaHidden === null) element.removeAttribute('aria-hidden')
+        else element.setAttribute('aria-hidden', ariaHidden)
+      })
+    }
+  }, [backdropRef])
 }
 
 function AlphaAcknowledgementDialog({
@@ -1258,10 +1460,12 @@ function AlphaAcknowledgementDialog({
   onClose: () => void
   returnFocus: HTMLButtonElement | null
 }) {
+  const backdropRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
   const checkboxRef = useRef<HTMLInputElement>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  useModalBackgroundInert(backdropRef)
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1295,7 +1499,7 @@ function AlphaAcknowledgementDialog({
   }, [returnFocus])
 
   return (
-    <div className="limits-backdrop">
+    <div ref={backdropRef} className="limits-backdrop">
       <section
         ref={dialogRef}
         className="limits-dialog"
@@ -1304,7 +1508,7 @@ function AlphaAcknowledgementDialog({
         aria-labelledby="limits-title"
       >
         <div className="section-heading compact-heading">
-          <span className="eyebrow">Portland Alpha</span>
+          <span className="eyebrow">Portland controlled alpha</span>
           <h2 id="limits-title">Before you continue</h2>
           <p>LumaDate is a Portland planning alpha.</p>
         </div>
@@ -1371,6 +1575,8 @@ function IntakeWizard({
   const [showFoodLimits, setShowFoodLimits] = useState(false)
   const [locationNotice, setLocationNotice] = useState('')
   const [selectedDatePreset, setSelectedDatePreset] = useState<string | null>(() => inferDatePreset(intake.dateStart))
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null)
+  const previousStepRef = useRef(step)
   const steps = ['Where', 'Time', 'Energy', 'Food', 'Likes', 'Safety', 'Review']
   const isLastStep = step === steps.length - 1
   const selectedAvoids = intake.mustAvoid
@@ -1381,6 +1587,10 @@ function IntakeWizard({
 
   useEffect(() => {
     onStepChange(step)
+    if (previousStepRef.current !== step) {
+      previousStepRef.current = step
+      window.requestAnimationFrame(() => stepHeadingRef.current?.focus())
+    }
   }, [onStepChange, step])
 
   function nextStep() {
@@ -1454,9 +1664,13 @@ function IntakeWizard({
     <section className="surface intake-wizard">
       <div className="section-heading">
         <span className="eyebrow">Planning flow</span>
-        <h2>{wizardTitles[step]}</h2>
-        <p>{wizardCopy[step]}</p>
-      </div>
+          <h2 ref={stepHeadingRef} tabIndex={-1}>{wizardTitles[step]}</h2>
+          <p>{wizardCopy[step]}</p>
+        </div>
+
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        Step {step + 1} of {steps.length}: {wizardTitles[step]}
+      </span>
 
       <WizardProgress labels={steps} activeStep={step} onEdit={setStep} nextTitle={wizardTitles[step + 1]} />
       <InlineGuidance step={step} intake={intake} />
@@ -2023,10 +2237,12 @@ function GuidanceCard({ step, intake }: { step: number; intake: Intake }) {
 }
 
 function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step: number) => void }) {
+  const moodSummary = intake.moodTypes.join(', ') || 'Flexible'
+  const activitySummary = intake.activityTypes.slice(0, 4).map(cleanLabel).join(', ')
   const reviewRows = [
     ['Where', 0, `${meetupStyleLabels[intake.meetupStyle]} by ${intake.transportMode} in ${intake.dateArea}.`],
     ['Time', 1, `${dateStageLabels[intake.dateStage]} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(intake.dateStart, 0)} with ${durationSummary(intake)} planned.`],
-    ['Vibe', 2, `${intake.moodTypes.join(', ') || 'Flexible'} with ${intake.activityTypes.slice(0, 4).map(cleanLabel).join(', ')}.`],
+    ['Vibe', 2, activitySummary ? `${moodSummary} with ${activitySummary}.` : `${moodSummary}.`],
     ['Budget', 3, budgetSummary(intake)],
     ['Food', 3, `${intake.foodWanted === 'no' ? 'No food needed' : `Food: ${intake.cuisineLikes || 'open'}`}; ${alcoholLabels[intake.alcoholPreference]}.`],
     ['What they enjoy', 4, intake.dateEnjoysText || 'No personal notes yet.'],
@@ -2059,6 +2275,7 @@ function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step:
 
 function ResultsPanel({
   rankedPlans,
+  intake,
   activeId,
   venuesByPlan,
   selectedVenueByPlan,
@@ -2068,6 +2285,7 @@ function ResultsPanel({
   onAdjust,
 }: {
   rankedPlans: RankedPlan[]
+  intake: Intake
   activeId: string
   venuesByPlan: Record<string, CuratedVenueMatch[]>
   selectedVenueByPlan: Record<string, string>
@@ -2087,7 +2305,9 @@ function ResultsPanel({
       <div className="result-list">
         {rankedPlans.map((ranked, index) => {
           const venues = venuesByPlan[ranked.plan.id] ?? []
-          const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id]) ?? venues[0]
+          const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id])
+            ?? automaticVenueForPlan(ranked.plan, venues)
+          const canonical = canonicalPlanFor(ranked, intake, venue)
           const isSaved = saved.some((item) => (
             item.planId === ranked.plan.id && (item.venueId ?? '') === (venue?.venue.id ?? '')
           ))
@@ -2104,16 +2324,21 @@ function ResultsPanel({
               <h3>{ranked.plan.title}</h3>
               <p>{ranked.plan.shortPitch}</p>
               <dl className="result-meta">
-                <div><dt>Venue</dt><dd>{venue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}</dd></div>
-                <div><dt>Area</dt><dd>{ranked.meetArea}</dd></div>
+                <div><dt>Plan anchor</dt><dd>{canonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, canonical.meetArea)}</dd></div>
+                <div><dt>Area</dt><dd>{canonical.meetArea}</dd></div>
                 <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
                 <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
               </dl>
               <p className="result-reason">{ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
+              {ranked.warnings.length > 0 && (
+                <div className="result-warnings" aria-label="Plan tradeoffs">
+                  {ranked.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+                </div>
+              )}
               <div className="result-card-actions">
                 <button type="button" className="primary" onClick={() => onOpen(ranked)}>Open plan</button>
-                <button type="button" className="secondary" onClick={() => onSave(ranked)}>
-                  {isSaved ? 'Saved for later' : 'Save for later'}
+                <button type="button" className="secondary" disabled={isSaved} onClick={() => onSave(ranked)}>
+                  {isSaved ? 'Saved' : 'Save for later'}
                 </button>
                 <button type="button" className="ghost" onClick={() => onAdjust(ranked)}>Adjust</button>
               </div>
@@ -2278,15 +2503,8 @@ function ItineraryPanel({
   onCopy: (label: string, text: string, selector?: string) => void
   selectedVenue?: CuratedVenueMatch
 }) {
-  const inviteText = `${inviteDraft}
-
-Plan: ${ranked.plan.title}
-Venue: ${selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}
-Meet: ${ranked.meetArea} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(
-    intake.dateStart,
-    0,
-  )}
-Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const inviteText = inviteTextFor(ranked, intake, inviteDraft, selectedVenue)
 
   return (
     <section className="surface itinerary" tabIndex={-1}>
@@ -2302,12 +2520,22 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
       </div>
 
       <div className="timeline">
-        {ranked.plan.itinerary.map((step) => (
-          <div className="timeline-row" key={`${step.title}-${step.timeOffsetMinutes}`}>
+        {canonical.stops.map((step) => (
+          <div className="timeline-row" key={step.id}>
             <time>{offsetTime(intake.dateStart, step.timeOffsetMinutes)}</time>
             <div>
               <strong>{step.title}</strong>
+              {step.place && (
+                <span className="timeline-place">
+                  {step.place.name} · {step.place.neighborhood}
+                </span>
+              )}
               <p>{step.description}</p>
+              {step.place?.mapsLink && (
+                <a className="inline-link" href={step.place.mapsLink} target="_blank" rel="noreferrer">
+                  Verify this stop in Maps
+                </a>
+              )}
             </div>
           </div>
         ))}
@@ -2317,9 +2545,9 @@ Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}`
         <button type="button" className="primary" onClick={() => onCopy('Invite copied', inviteText)}>
           {copied === 'Invite copied' ? 'Copied' : 'Copy invite'}
         </button>
-        {selectedVenue ? (
-          <a className="secondary link-button" href={selectedVenue.venue.mapsUrl} target="_blank" rel="noreferrer">
-            Open map / verify place
+        {canonical.anchorPlace?.mapsLink ? (
+          <a className="secondary link-button" href={canonical.anchorPlace.mapsLink} target="_blank" rel="noreferrer">
+            Open anchor in Maps
           </a>
         ) : (
           <button type="button" className="secondary" onClick={() => onOpenSheet('booking')}>
@@ -2359,6 +2587,7 @@ function PlanSummaryCard({
   intake: Intake
   selectedVenue?: CuratedVenueMatch
 }) {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
   return (
     <section className="plan-summary" aria-label="Plan summary">
       <div className="summary-topline">
@@ -2369,8 +2598,11 @@ function PlanSummaryCard({
       <p>{ranked.plan.shortPitch}</p>
       <div className="summary-grid">
         <span><strong>Date</strong>{formatPlanDate(intake.dateStart)} · {offsetTime(intake.dateStart, 0)}</span>
-        <span><strong>Venue</strong>{selectedVenue?.venue.name ?? primaryAnchor(ranked.plan, ranked.meetArea)}</span>
-        <span><strong>Area</strong>{ranked.meetArea}</span>
+        <span><strong>Anchor</strong>{canonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, canonical.meetArea)}</span>
+        {selectedVenue && canonical.anchorPlace?.id !== selectedVenue.venue.id && (
+          <span><strong>Selected venue</strong>{selectedVenue.venue.name}</span>
+        )}
+        <span><strong>Area</strong>{canonical.meetArea}</span>
         <span><strong>Duration</strong>{formatDuration(ranked.plan.estimatedDurationMinutes)}</span>
         <span><strong>Cost</strong>{formatCostRange(ranked.plan.estimatedCostTotal)}</span>
       </div>
@@ -2486,20 +2718,26 @@ function AdjustPanel({
 
 function AlertsPanel({
   ranked,
+  intake,
+  selectedVenue,
   reminders,
   onOpenReminders,
   onOpenAssistant,
   onOpenExit,
 }: {
   ranked: RankedPlan
+  intake: Intake
+  selectedVenue?: CuratedVenueMatch
   reminders: ReminderSettings
   onOpenReminders: () => void
   onOpenAssistant: () => void
   onOpenExit: () => void
 }) {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const firstStop = canonical.stops[0]
   const alerts = [
     reminders.dayBefore && 'Tomorrow morning: confirm the reservation or tickets.',
-    reminders.twoHours && `Two hours before: review ${ranked.plan.title}.`,
+    reminders.twoHours && `Two hours before: review ${ranked.plan.title}. First stop: ${firstStop?.place?.name ?? canonical.meetArea}.`,
     reminders.leaveTime && `${ranked.leaveBy}: ${ranked.trafficNote}.`,
     reminders.runningLate && '15 minutes before: LumaDate will ask if you are on time.',
     reminders.safetyCheck && 'Safety check-in: copy your public itinerary to a trusted contact.',
@@ -2511,7 +2749,7 @@ function AlertsPanel({
         <span className="eyebrow">Demo reminders</span>
         <h2>Copyable reminder checklist.</h2>
       </div>
-      <TonightModeCard ranked={ranked} onOpenReminders={onOpenReminders} />
+      <TonightModeCard ranked={ranked} canonical={canonical} onOpenReminders={onOpenReminders} />
       <div className="alert-list">
         {alerts.map((alert) => (
           <p key={alert}>{alert}</p>
@@ -2530,7 +2768,15 @@ function AlertsPanel({
   )
 }
 
-function TonightModeCard({ ranked, onOpenReminders }: { ranked: RankedPlan; onOpenReminders: () => void }) {
+function TonightModeCard({
+  ranked,
+  canonical,
+  onOpenReminders,
+}: {
+  ranked: RankedPlan
+  canonical: CanonicalPlan
+  onOpenReminders: () => void
+}) {
   return (
     <section className="tonight-card">
       <div>
@@ -2540,6 +2786,7 @@ function TonightModeCard({ ranked, onOpenReminders }: { ranked: RankedPlan; onOp
       </div>
       <div className="tonight-grid">
         <span>ETA: example 24 min</span>
+        <span>Anchor: {canonical.anchorPlace?.name ?? canonical.meetArea}</span>
         <span>Backup: {ranked.plan.backupOptions[0] ?? 'nearby cafe'}</span>
         <span>Weather note: light layer</span>
       </div>
@@ -2553,18 +2800,20 @@ function TonightModeCard({ ranked, onOpenReminders }: { ranked: RankedPlan; onOp
 function SafetyPanel({
   ranked,
   intake,
+  selectedVenue,
   copied,
   onCopy,
   onOpenExit,
 }: {
   ranked: RankedPlan
   intake: Intake
+  selectedVenue?: CuratedVenueMatch
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
   onOpenExit: () => void
 }) {
-  const text = safetyText(ranked, intake)
-  const stops = publicStopDetails(ranked, intake)
+  const text = safetyText(ranked, intake, selectedVenue)
+  const stops = publicStopDetails(ranked, intake, selectedVenue)
   return (
     <section className="surface">
       <div className="section-heading">
@@ -2574,7 +2823,7 @@ function SafetyPanel({
       </div>
       <div className="public-stop-list" aria-label="Public safety stops">
         {stops.map((stop) => (
-          <article className="public-stop-card" key={`${stop.time}-${stop.title}`}>
+          <article className="public-stop-card" key={stop.id}>
             <time>{stop.time}</time>
             <div>
               <strong>{stop.placeName}</strong>
@@ -2692,15 +2941,16 @@ function SettingsCard({
   return (
     <section className="side-card">
       <span className="eyebrow">Defaults</span>
-      <label>
-        First-date safe
+      <label className="setting-group">
+        <strong>Optional recommendations</strong>
+        <span>First-date safe</span>
         <input
           type="checkbox"
           checked={intake.firstDateSafeMode}
           onChange={(event) => onChange('firstDateSafeMode', event.target.checked)}
         />
       </label>
-      <p className="privacy-note"><strong>Private origin is always hidden.</strong> This protection cannot be turned off.</p>
+      <p className="privacy-note"><strong>Always-on privacy</strong> Private origin is hidden and cannot be included in shared plan text.</p>
       <button type="button" className="ghost wide" onClick={onClear}>
         Clear planning data
       </button>
@@ -2708,7 +2958,18 @@ function SettingsCard({
   )
 }
 
-function BookingSheet({ ranked, onClose }: { ranked: RankedPlan; onClose: () => void }) {
+function BookingSheet({
+  ranked,
+  intake,
+  selectedVenue,
+  onClose,
+}: {
+  ranked: RankedPlan
+  intake: Intake
+  selectedVenue?: CuratedVenueMatch
+  onClose: () => void
+}) {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
   return (
     <SheetFrame title="Booking and reservation" onClose={onClose}>
       <p className="sheet-copy">
@@ -2717,21 +2978,33 @@ function BookingSheet({ ranked, onClose }: { ranked: RankedPlan; onClose: () => 
       </p>
       <div className="provider-note">
         <strong>Main anchor</strong>
-        <span>{primaryAnchor(ranked.plan, ranked.meetArea)}</span>
+        <span>{canonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, canonical.meetArea)}</span>
       </div>
       <div className="provider-list">
-        {ranked.plan.providers.map((provider) => (
-          <a
-            key={`${provider.type}-${provider.label}`}
-            className="provider-card"
-            href={provider.mode === 'call' ? `tel:${provider.phone}` : provider.url ?? '#'}
-            target={provider.url ? '_blank' : undefined}
-            rel={provider.url ? 'noreferrer' : undefined}
-          >
-            <strong>{provider.label}</strong>
-            <span>{providerModeLabel(provider.mode)}</span>
-          </a>
-        ))}
+        {ranked.plan.providers.map((provider) => {
+          const href = provider.mode === 'call' && provider.phone ? `tel:${provider.phone}` : provider.url
+          const content = (
+            <>
+              <strong>{provider.label}</strong>
+              <span>{providerModeLabel(provider.mode)}</span>
+            </>
+          )
+          return href ? (
+            <a
+              key={`${provider.type}-${provider.label}`}
+              className="provider-card"
+              href={href}
+              target={provider.url ? '_blank' : undefined}
+              rel={provider.url ? 'noreferrer' : undefined}
+            >
+              {content}
+            </a>
+          ) : (
+            <div key={`${provider.type}-${provider.label}`} className="provider-card provider-card-disabled" aria-disabled="true">
+              {content}
+            </div>
+          )
+        })}
       </div>
       <p className="sheet-copy">Before leaving: check maps, hours, review recency, weather for park stops, and the provider's own confirmation screen.</p>
     </SheetFrame>
@@ -2777,6 +3050,8 @@ function ReminderSheet({
 
 function LateSheet({
   ranked,
+  intake,
+  selectedVenue,
   minutes,
   onMinutes,
   copied,
@@ -2784,14 +3059,16 @@ function LateSheet({
   onClose,
 }: {
   ranked: RankedPlan
+  intake: Intake
+  selectedVenue?: CuratedVenueMatch
   minutes: number
   onMinutes: (minutes: number) => void
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
   onClose: () => void
 }) {
-  const message = `Hi, this is Zach. I have a reservation or plan for ${ranked.plan.title}. We are running about ${minutes} minutes late. Could you please hold the spot if possible? Thank you.`
-  const phoneProvider = ranked.plan.providers.find((provider) => provider.mode === 'call')
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const message = `Hi, I have a plan for ${ranked.plan.title} at ${canonical.anchorPlace?.name ?? canonical.meetArea}. We are running about ${minutes} minutes late. Could you please let us know whether the plan can still work? Thank you.`
   return (
     <SheetFrame title="Running-late assistant" onClose={onClose}>
       <p className="sheet-copy">Choose the delay and copy a message. SMS is intentionally not sent in this demo.</p>
@@ -2813,9 +3090,13 @@ function LateSheet({
         <button type="button" className="primary" onClick={() => onCopy('Late copied', message, '[data-copy-target="late"]')}>
           {copied === 'Late copied' ? 'Copied' : 'Copy message'}
         </button>
-        <a className="secondary link-button" href={phoneProvider?.phone ? `tel:${phoneProvider.phone}` : '#'}>
-          Call venue
-        </a>
+        {canonical.anchorPlace?.mapsLink ? (
+          <a className="secondary link-button" href={canonical.anchorPlace.mapsLink} target="_blank" rel="noreferrer">
+            Find phone number in Maps
+          </a>
+        ) : (
+          <button type="button" className="secondary" disabled>Phone lookup unavailable</button>
+        )}
       </div>
       <p className="sheet-copy">{ranked.crowdBackup}</p>
     </SheetFrame>
@@ -2825,17 +3106,19 @@ function LateSheet({
 function SafetySheet({
   ranked,
   intake,
+  selectedVenue,
   copied,
   onCopy,
   onClose,
 }: {
   ranked: RankedPlan
   intake: Intake
+  selectedVenue?: CuratedVenueMatch
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
   onClose: () => void
 }) {
-  const text = safetyText(ranked, intake)
+  const text = safetyText(ranked, intake, selectedVenue)
   return (
     <SheetFrame title="Safety share" onClose={onClose}>
       <textarea className="copy-box safety-copy" data-copy-target="safety-sheet" value={text} readOnly />
@@ -2849,6 +3132,7 @@ function SafetySheet({
 function InviteSheet({
   ranked,
   intake,
+  selectedVenue,
   inviteDraft,
   onInviteDraft,
   copied,
@@ -2857,17 +3141,15 @@ function InviteSheet({
 }: {
   ranked: RankedPlan
   intake: Intake
+  selectedVenue?: CuratedVenueMatch
   inviteDraft: string
   onInviteDraft: (draft: string) => void
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
   onClose: () => void
 }) {
-  const inviteText = `${inviteDraft}
+  const inviteText = `${inviteTextFor(ranked, intake, inviteDraft, selectedVenue)}
 
-Plan: ${ranked.plan.title}
-Meet: ${ranked.meetArea} at ${offsetTime(intake.dateStart, 0)}
-Why it fits: ${ranked.reasons[0] ?? ranked.plan.shortPitch}
 Booking note: ${bookingLabels[ranked.plan.bookingType]}`
 
   return (
@@ -2899,11 +3181,22 @@ Booking note: ${bookingLabels[ranked.plan.bookingType]}`
   )
 }
 
-function AssistantSheet({ ranked, intake, onClose }: { ranked: RankedPlan; intake: Intake; onClose: () => void }) {
+function AssistantSheet({
+  ranked,
+  intake,
+  selectedVenue,
+  onClose,
+}: {
+  ranked: RankedPlan
+  intake: Intake
+  selectedVenue?: CuratedVenueMatch
+  onClose: () => void
+}) {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
   const suggestions = [
     `${ranked.leaveBy}. ${ranked.trafficNote}.`,
     `If ${ranked.plan.title} feels crowded, pivot to ${ranked.plan.backupOptions[0] ?? 'a quieter nearby backup'}.`,
-    `Keep it ${intake.moodTypes[0] ?? 'flexible'} and public: ${ranked.meetArea}.`,
+    `Keep it ${intake.moodTypes[0] ?? 'flexible'} and public: ${canonical.meetArea}. Anchor: ${canonical.anchorPlace?.name ?? 'verify the first stop'}.`,
   ]
 
   return (
@@ -2939,12 +3232,14 @@ function AssistantSheet({ ranked, intake, onClose }: { ranked: RankedPlan; intak
 
 function ExitPlanSheet({
   ranked,
+  intake,
   selectedVenue,
   copied,
   onCopy,
   onClose,
 }: {
   ranked: RankedPlan
+  intake: Intake
   selectedVenue?: CuratedVenueMatch
   copied: string
   onCopy: (label: string, text: string, selector?: string) => void
@@ -2952,7 +3247,7 @@ function ExitPlanSheet({
 }) {
   const [contactIntent, setContactIntent] = useState<TrustedContactIntent>('call_five')
   const [shareStatus, setShareStatus] = useState('')
-  const contactMessage = trustedContactMessage(contactIntent, ranked, selectedVenue)
+  const contactMessage = trustedContactMessage(contactIntent, ranked, selectedVenue, intake)
   const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
   async function shareContactMessage() {
@@ -3078,14 +3373,35 @@ function ExitPlanSheet({
 }
 
 function SheetFrame({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  const backdropRef = useRef<HTMLDivElement>(null)
+  const sheetRef = useRef<HTMLElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  useModalBackgroundInert(backdropRef)
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !sheetRef.current) return
+      const focusable = [...sheetRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      )]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     closeButtonRef.current?.focus()
@@ -3096,8 +3412,8 @@ function SheetFrame({ title, children, onClose }: { title: string; children: Rea
   }, [])
 
   return (
-    <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label={title}>
-      <section className="sheet">
+    <div ref={backdropRef} className="sheet-backdrop" role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={sheetRef} className="sheet">
         <div className="sheet-header">
           <h2>{title}</h2>
           <button ref={closeButtonRef} type="button" className="ghost" onClick={onClose}>
@@ -3110,11 +3426,13 @@ function SheetFrame({ title, children, onClose }: { title: string; children: Rea
   )
 }
 
-export function publicStopDetails(ranked: RankedPlan, intake: Intake) {
-  return ranked.plan.itinerary.map((step) => {
-    const place = step.placeIndex === undefined ? undefined : ranked.plan.places?.[step.placeIndex]
+export function publicStopDetails(ranked: RankedPlan, intake: Intake, selectedVenue?: CuratedVenueMatch) {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  return canonical.stops.map((step) => {
+    const place = step.place
     const outdoor = place ? /park|walk|garden|outdoor/i.test(place.category) : ranked.plan.safetyProfile.outdoor
     return {
+      id: step.id,
       time: offsetTime(intake.dateStart, step.timeOffsetMinutes),
       title: step.title,
       placeName: place?.name ?? step.title,
@@ -3131,8 +3449,9 @@ export function publicStopDetails(ranked: RankedPlan, intake: Intake) {
   })
 }
 
-export function safetyText(ranked: RankedPlan, intake: Intake): string {
-  const stops = publicStopDetails(ranked, intake)
+export function safetyText(ranked: RankedPlan, intake: Intake, selectedVenue?: CuratedVenueMatch): string {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const stops = publicStopDetails(ranked, intake, selectedVenue)
     .map((stop) => `${stop.time} - ${stop.placeName} - ${stop.location}
 Map: ${stop.mapsLink ?? 'verify in app'}
 Notes: ${stop.qualities || 'public stop; verify before leaving'}`)
@@ -3140,7 +3459,7 @@ Notes: ${stop.qualities || 'public stop; verify before leaving'}`)
 
   return `LumaDate safety share
 Plan: ${ranked.plan.title}
-Public meet area: ${ranked.meetArea}
+Public meet area: ${canonical.meetArea}
 Date: ${formatPlanDate(intake.dateStart)}
 Start: ${offsetTime(intake.dateStart, 0)}
 Check-in: ${offsetTime(intake.dateStart, Math.min(ranked.plan.estimatedDurationMinutes, 150))}

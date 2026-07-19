@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import plansJson from './data/datePlans.json'
 import {
+  canonicalPlanFor,
   calmExitMessages,
   createDefaultIntake,
   createExampleIntake,
   dateWindow,
   durationSettingFor,
+  estimatedCostRange,
+  inviteTextFor,
   looksLikeStreetAddress,
   meetAreaFor,
   normalizeIntake,
+  planMatchesArea,
   publicStopDetails,
   rankPlans,
   safetyText,
@@ -92,14 +96,64 @@ describe('Portland alpha planning safeguards', () => {
         leaveBy: '',
         crowdForecast: '',
         crowdBackup: '',
+        areaMatch: planMatchesArea(intake, plan),
+        budgetFits: estimatedCostRange(plan.estimatedCostTotal).high <= intake.budgetMax,
+        estimatedCostHigh: estimatedCostRange(plan.estimatedCostTotal).high,
       }
+      const canonical = canonicalPlanFor(ranked, intake)
       const stops = publicStopDetails(ranked, intake)
 
       plan.itinerary.forEach((step, index) => {
-        expect(step.placeIndex).toBeTypeOf('number')
-        expect(stops[index].placeName).toBe(plan.places?.[step.placeIndex ?? -1]?.name)
+        expect(step.id).toBeTruthy()
+        expect(step.placeId).toBeTruthy()
+        expect(stops[index].id).toBe(step.id)
+        expect(stops[index].placeName).toBe(plan.places?.find((place) => place.id === step.placeId)?.name)
+        expect(canonical.stops[index].place?.name).toBe(stops[index].placeName)
       })
     }
+  })
+
+  it('uses one canonical ordered schedule across itinerary, invite, safety, and Maps handoffs', () => {
+    const intake = createExampleIntake(new Date(2026, 6, 17, 12, 0))
+
+    for (const ranked of rankPlans(intake)) {
+      const canonical = canonicalPlanFor(ranked, intake)
+      const invite = inviteTextFor(ranked, intake, 'Want to try this plan?')
+      const safety = safetyText(ranked, intake)
+
+      expect(new Set(canonical.stops.map((stop) => stop.id)).size).toBe(canonical.stops.length)
+      for (const stop of canonical.stops) {
+        expect(invite).toContain(stop.title)
+        expect(safety).toContain(stop.place?.name ?? stop.title)
+      }
+      expect(canonical.anchorPlace?.mapsLink).toMatch(/^https:\/\//)
+      expect(canonical.meetArea).toBe(ranked.meetArea)
+    }
+  })
+
+  it('keeps the best fit inside the selected area and full estimated budget range', () => {
+    const intake = {
+      ...createDefaultIntake(new Date(2026, 6, 17, 12, 0)),
+      dateArea: 'SE Portland',
+      budgetMax: 120,
+      dateEnjoysText: 'sushi jazz bookstores',
+    }
+    const ranked = rankPlans(intake)
+
+    expect(ranked[0].areaMatch).toBe(true)
+    expect(ranked[0].budgetFits).toBe(true)
+    expect(ranked[0].plan.neighborhoods).toContain('SE Portland')
+    expect(ranked[0].estimatedCostHigh).toBeLessThanOrEqual(120)
+    expect(ranked.find((item) => item.plan.id === 'jazz-sushi-bookstore-evening')?.warnings.join(' ')).toContain('over budget')
+  })
+
+  it('names the defining comedy venue as the plan anchor', () => {
+    const intake = createDefaultIntake(new Date(2026, 6, 17, 12, 0))
+    const comedy = rankPlans({ ...intake, dateArea: 'NE Portland', activityTypes: ['comedy'] })
+      .find((ranked) => ranked.plan.id === 'comedy-mocktails')
+
+    expect(comedy).toBeDefined()
+    expect(canonicalPlanFor(comedy!, intake).anchorPlace?.name).toBe('Helium Comedy Club Portland')
   })
 
   it('surfaces dietary verification warnings in ranked plans', () => {

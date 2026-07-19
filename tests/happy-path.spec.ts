@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-async function acknowledgeAndEnter(page: Page, buttonName: 'Build my Portland plan' | 'Preview an example') {
+async function acknowledgeAndEnter(page: Page, buttonName: 'Build my date plan' | 'See a Portland example') {
   await page.goto('/')
   await page.getByRole('button', { name: buttonName }).click()
   const dialog = page.getByRole('dialog', { name: 'Before you continue' })
@@ -17,12 +17,12 @@ async function expectNoHorizontalOverflow(page: Page) {
 
 test('landing acknowledgement is accessible, remembers the session, and preserves the destination', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByText('Portland Alpha').first()).toBeVisible()
+  await expect(page.getByText('Portland controlled alpha').first()).toBeVisible()
   await expect(page.locator('.welcome-hero-preview')).toHaveCount(0)
   await expect(page.getByText('No account or GPS')).toHaveCount(0)
 
-  const buildButton = page.getByRole('button', { name: 'Build my Portland plan' })
-  const previewButton = page.getByRole('button', { name: 'Preview an example' })
+  const buildButton = page.getByRole('button', { name: 'Build my date plan' })
+  const previewButton = page.getByRole('button', { name: 'See a Portland example' })
   const buildBox = await buildButton.boundingBox()
   const previewBox = await previewButton.boundingBox()
   expect(buildBox).not.toBeNull()
@@ -33,6 +33,7 @@ test('landing acknowledgement is accessible, remembers the session, and preserve
   await buildButton.click()
   const dialog = page.getByRole('dialog', { name: 'Before you continue' })
   await expect(dialog).toBeVisible()
+  await expect(page.locator('.welcome-panel')).toHaveAttribute('aria-hidden', 'true')
   await expect(dialog.getByRole('button', { name: 'Continue' })).toBeDisabled()
   await expect(dialog.getByText('never a private street address')).toBeVisible()
   await page.keyboard.press('Escape')
@@ -46,7 +47,7 @@ test('landing acknowledgement is accessible, remembers the session, and preserve
   await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Build my Portland plan' }).click()
+  await page.getByRole('button', { name: 'Build my date plan' }).click()
   await expect(page.getByRole('dialog', { name: 'Before you continue' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Where should the date happen?' })).toBeVisible()
   await expect(page.getByText('Demo profile')).toHaveCount(0)
@@ -54,8 +55,9 @@ test('landing acknowledgement is accessible, remembers the session, and preserve
 })
 
 test('duration uses one stepped slider and every budget is total for the date', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Build my Portland plan')
+  await acknowledgeAndEnter(page, 'Build my date plan')
   await page.getByRole('button', { name: 'Next' }).click()
+  await expect(page.getByRole('heading', { name: 'When and how flexible?' })).toBeFocused()
 
   const duration = page.getByRole('slider', { name: 'Date duration' })
   await expect(duration).toHaveCount(1)
@@ -84,7 +86,7 @@ test('duration uses one stepped slider and every budget is total for the date', 
 })
 
 test('ranked results contain exactly three independently actionable plans', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Preview an example')
+  await acknowledgeAndEnter(page, 'See a Portland example')
 
   const cards = page.locator('article.result-card')
   await expect(cards).toHaveCount(3)
@@ -92,6 +94,8 @@ test('ranked results contain exactly three independently actionable plans', asyn
   await expect(page.getByRole('button', { name: 'Save for later', exact: true })).toHaveCount(3)
   await expect(cards.getByRole('button', { name: 'Adjust', exact: true })).toHaveCount(3)
   await expect(page.getByText('Curated Portland venue pool')).toHaveCount(0)
+  await expect(cards.nth(1)).toContainText('Barista Pearl District')
+  await expect(cards.nth(2)).toContainText('Helium Comedy Club Portland')
 
   const secondTitle = await cards.nth(1).getByRole('heading').innerText()
   await cards.nth(1).getByRole('button', { name: 'Save for later' }).click()
@@ -112,7 +116,7 @@ test('ranked results contain exactly three independently actionable plans', asyn
 })
 
 test('venue changes live under Adjust and update an already-saved plan', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Preview an example')
+  await acknowledgeAndEnter(page, 'See a Portland example')
   const firstCard = page.locator('article.result-card').first()
   await firstCard.getByRole('button', { name: 'Save for later' }).click()
   await firstCard.getByRole('button', { name: 'Open plan' }).click()
@@ -135,7 +139,7 @@ test('venue changes live under Adjust and update an already-saved plan', async (
 })
 
 test('safety share still uses public itinerary stops and no private origin', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Preview an example')
+  await acknowledgeAndEnter(page, 'See a Portland example')
   await page.locator('article.result-card').first().getByRole('button', { name: 'Open plan' }).click()
   await page.getByRole('button', { name: 'Safety share' }).click()
 
@@ -148,6 +152,43 @@ test('safety share still uses public itinerary stops and no private origin', asy
   await expectNoHorizontalOverflow(page)
 })
 
+test('the selected plan keeps one venue schedule across itinerary, invite, safety, and Maps', async ({ page }) => {
+  await acknowledgeAndEnter(page, 'See a Portland example')
+  const firstCard = page.locator('article.result-card').first()
+  await expect(firstCard).toContainText('SE Portland public meet point')
+  await expect(firstCard).toContainText('$70-$110 example total')
+  await firstCard.getByRole('button', { name: 'Open plan' }).click()
+
+  const timelinePlaces = (await page.locator('.timeline-place').allTextContents())
+    .map((value) => value.split(' · ')[0].trim())
+  expect(timelinePlaces.length).toBeGreaterThan(2)
+
+  const mapHref = await page.getByRole('link', { name: 'Open anchor in Maps' }).getAttribute('href')
+  expect(mapHref).toContain('Laurelhurst')
+
+  await page.getByRole('button', { name: 'Copy invite' }).click()
+  await expect(page.locator('.toast-region')).toContainText(/Invite copied|Copy blocked/)
+
+  await page.getByText('More tools', { exact: true }).click()
+  await page.getByRole('button', { name: 'Edit invite' }).click()
+  const invite = await page.getByRole('dialog', { name: 'Invite starter' }).getByRole('textbox').inputValue()
+  for (const place of new Set(timelinePlaces)) expect(invite).toContain(place)
+  await page.getByRole('button', { name: 'Close' }).click()
+
+  await page.getByRole('button', { name: 'Safety share' }).click()
+  const safety = await page.getByRole('dialog', { name: 'Safety share' }).getByRole('textbox').inputValue()
+  for (const place of new Set(timelinePlaces)) expect(safety).toContain(place)
+  await page.getByRole('button', { name: 'Copy safety text' }).click()
+  await expect(page.locator('.toast-region')).toContainText(/Safety copied|Copy blocked/)
+  await page.getByRole('button', { name: 'Close' }).click()
+
+  await page.getByRole('button', { name: 'Running late' }).click()
+  const lateDialog = page.getByRole('dialog', { name: 'Running-late assistant' })
+  await expect(lateDialog.getByRole('link', { name: 'Find phone number in Maps' })).toHaveAttribute('href', /^https:\/\//)
+  await expect(lateDialog.getByText('Call venue', { exact: true })).toHaveCount(0)
+  await expectNoHorizontalOverflow(page)
+})
+
 test('Help me leave separates calm exits, trusted-contact urgency, and emergency guidance', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'share', {
@@ -157,7 +198,7 @@ test('Help me leave separates calm exits, trusted-contact urgency, and emergency
       },
     })
   })
-  await acknowledgeAndEnter(page, 'Preview an example')
+  await acknowledgeAndEnter(page, 'See a Portland example')
   await page.getByRole('button', { name: 'Alerts', exact: true }).click()
   await page.getByRole('button', { name: 'Help me leave', exact: true }).click()
 

@@ -8,6 +8,8 @@
       "Pearl District"
     ],
     "city": "Portland, OR",
+    "featuredPlaceId": "jazz-sushi",
+    "replaceablePlaceId": "jazz-sushi",
     "estimatedCostTotal": 115,
     "estimatedCostLevel": 3,
     "estimatedDurationMinutes": 240,
@@ -38,30 +40,34 @@
     },
     "itinerary": [
       {
+        "id": "jazz-meet",
         "timeOffsetMinutes": 0,
-        "title": "Meet at a public landmark near dinner",
-        "placeIndex": 0,
+        "title": "Meet outside the dinner venue",
+        "placeId": "jazz-sushi",
         "description": "Neutral, easy-to-find meeting point. Exact private origins are not shared.",
         "canReplace": false
       },
       {
+        "id": "jazz-dinner",
         "timeOffsetMinutes": 15,
         "title": "Sushi dinner",
-        "placeIndex": 0,
+        "placeId": "jazz-sushi",
         "description": "Reservation recommended. Keep the table time flexible if possible.",
         "canReplace": true
       },
       {
+        "id": "jazz-show",
         "timeOffsetMinutes": 105,
         "title": "Jazz set",
-        "placeIndex": 1,
+        "placeId": "jazz-club",
         "description": "Shared music gives the date an anchor without forcing constant conversation.",
         "canReplace": true
       },
       {
+        "id": "jazz-finish",
         "timeOffsetMinutes": 210,
         "title": "Optional bookstore or quiet dessert",
-        "placeIndex": 2,
+        "placeId": "jazz-bookstore",
         "description": "Low-pressure extension if the night is going well.",
         "canReplace": true
       }
@@ -98,6 +104,7 @@
     ],
     "places": [
       {
+        "id": "jazz-sushi",
         "name": "Bamboo Sushi NW",
         "category": "Sushi dinner",
         "neighborhood": "NW Portland",
@@ -109,6 +116,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "jazz-club",
         "name": "Jack London Revue",
         "category": "Jazz club",
         "neighborhood": "Downtown Portland",
@@ -120,6 +128,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "jazz-bookstore",
         "name": "Powell's City of Books",
         "category": "Bookstore finish",
         "neighborhood": "Pearl District Portland",
@@ -141,6 +150,8 @@
       "NW Portland"
     ],
     "city": "Portland, OR",
+    "featuredPlaceId": "coffee-cafe",
+    "replaceablePlaceId": "coffee-cafe",
     "estimatedCostTotal": 35,
     "estimatedCostLevel": 1,
     "estimatedDurationMinutes": 120,
@@ -170,23 +181,26 @@
     },
     "itinerary": [
       {
+        "id": "coffee-meet",
         "timeOffsetMinutes": 0,
         "title": "Meet for coffee",
-        "placeIndex": 0,
+        "placeId": "coffee-cafe",
         "description": "Start somewhere public and casual.",
         "canReplace": true
       },
       {
+        "id": "coffee-art",
         "timeOffsetMinutes": 45,
         "title": "Nearby art/gallery walk",
-        "placeIndex": 1,
+        "placeId": "coffee-museum",
         "description": "Movement keeps it from feeling like an interview.",
         "canReplace": true
       },
       {
+        "id": "coffee-dessert",
         "timeOffsetMinutes": 105,
         "title": "Optional dessert",
-        "placeIndex": 2,
+        "placeId": "coffee-dessert-place",
         "description": "Extend only if both people want to.",
         "canReplace": true
       }
@@ -212,6 +226,7 @@
     ],
     "places": [
       {
+        "id": "coffee-cafe",
         "name": "Barista Pearl District",
         "category": "Coffee",
         "neighborhood": "Pearl District Portland",
@@ -223,6 +238,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "coffee-museum",
         "name": "Portland Art Museum",
         "category": "Art walk / museum",
         "neighborhood": "Downtown Portland",
@@ -234,6 +250,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "coffee-dessert-place",
         "name": "Pix Patisserie",
         "category": "Dessert",
         "neighborhood": "Portland",
@@ -256,6 +273,8 @@
       "Kerns"
     ],
     "city": "Portland, OR",
+    "featuredPlaceId": "laurelhurst-park",
+    "replaceablePlaceId": "laurelhurst-dinner",
     "estimatedCostTotal": 70,
     "estimatedCostLevel": 2,
     "estimatedDurationMinutes": 135,
@@ -290,30 +309,34 @@
     },
     "itinerary": [
       {
+        "id": "laurelhurst-meet",
         "timeOffsetMinutes": 0,
         "title": "Meet at Laurelhurst Park public entrance",
-        "placeIndex": 0,
+        "placeId": "laurelhurst-park",
         "description": "Start at a visible public park meet point. Private origins stay out of the shared plan.",
         "canReplace": false
       },
       {
+        "id": "laurelhurst-walk",
         "timeOffsetMinutes": 15,
         "title": "Walk the Laurelhurst Park loop",
-        "placeIndex": 0,
+        "placeId": "laurelhurst-park",
         "description": "A relaxed public walk gives the date movement and easy conversation before food.",
         "canReplace": true
       },
       {
+        "id": "laurelhurst-dinner-stop",
         "timeOffsetMinutes": 60,
         "title": "Dinner nearby in SE Portland",
-        "placeIndex": 1,
+        "placeId": "laurelhurst-dinner",
         "description": "Pick a real nearby restaurant and verify current hours or wait time before leaving the park.",
         "canReplace": true
       },
       {
+        "id": "laurelhurst-dessert",
         "timeOffsetMinutes": 115,
         "title": "Optional coffee or dessert extension",
-        "placeIndex": 2,
+        "placeId": "laurelhurst-dessert-place",
         "description": "Keep the night flexible with a short public cafe/dessert backup if the date is going well.",
         "canReplace": true
       }
@@ -345,6 +368,7 @@
     ],
     "places": [
       {
+        "id": "laurelhurst-park",
         "name": "Laurelhurst Park",
         "category": "Public park walk",
         "neighborhood": "SE Portland",
@@ -356,6 +380,7 @@
         "warning": "Use daytime/early evening judgment and verify lighting/weather before choosing a park walk."
       },
       {
+        "id": "laurelhurst-dinner",
         "name": "Laurelhurst Market",
         "category": "Dinner nearby",
         "neighborhood": "Kerns / Laurelhurst Portland",
@@ -367,6 +392,7 @@
         "warning": "Verify current hours and reservation/wait-time availability before presenting it as the dinner anchor."
       },
       {
+        "id": "laurelhurst-dessert-place",
         "name": "Rimsky-Korsakoffee House",
         "category": "Dessert / coffee backup",
         "neighborhood": "SE Portland",
@@ -387,6 +413,8 @@
       "Portland Metro"
     ],
     "city": "Portland, OR",
+    "featuredPlaceId": "pottery-class",
+    "replaceablePlaceId": "pottery-coffee",
     "estimatedCostTotal": 150,
     "estimatedCostLevel": 4,
     "estimatedDurationMinutes": 180,
@@ -416,23 +444,26 @@
     },
     "itinerary": [
       {
+        "id": "pottery-meet",
         "timeOffsetMinutes": 0,
         "title": "Meet at studio",
-        "placeIndex": 0,
+        "placeId": "pottery-studio",
         "description": "Arrive 10 minutes early for check-in.",
         "canReplace": false
       },
       {
+        "id": "pottery-activity",
         "timeOffsetMinutes": 15,
         "title": "Pottery class",
-        "placeIndex": 1,
+        "placeId": "pottery-class",
         "description": "Activity carries the date and reduces awkward silence.",
         "canReplace": true
       },
       {
+        "id": "pottery-coffee-stop",
         "timeOffsetMinutes": 135,
         "title": "Coffee afterward",
-        "placeIndex": 2,
+        "placeId": "pottery-coffee",
         "description": "Optional debrief after the class.",
         "canReplace": true
       }
@@ -463,6 +494,7 @@
     ],
     "places": [
       {
+        "id": "pottery-studio",
         "name": "Radius Art Studio",
         "category": "Creative class search anchor",
         "neighborhood": "Portland",
@@ -474,6 +506,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "pottery-class",
         "name": "Portland Pottery",
         "category": "Pottery class search anchor",
         "neighborhood": "Portland",
@@ -485,6 +518,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "pottery-coffee",
         "name": "Good Coffee",
         "category": "Coffee after",
         "neighborhood": "Portland",
@@ -505,6 +539,8 @@
       "Portland"
     ],
     "city": "Portland, OR",
+    "featuredPlaceId": "comedy-club",
+    "replaceablePlaceId": "comedy-food",
     "estimatedCostTotal": 85,
     "estimatedCostLevel": 2,
     "estimatedDurationMinutes": 170,
@@ -534,23 +570,26 @@
     },
     "itinerary": [
       {
+        "id": "comedy-food-stop",
         "timeOffsetMinutes": 0,
         "title": "Mocktails or snacks",
-        "placeIndex": 1,
+        "placeId": "comedy-food",
         "description": "Start before the show without making alcohol required.",
         "canReplace": true
       },
       {
+        "id": "comedy-show",
         "timeOffsetMinutes": 45,
         "title": "Comedy show",
-        "placeIndex": 0,
+        "placeId": "comedy-club",
         "description": "Shared entertainment creates easy conversation later.",
         "canReplace": true
       },
       {
+        "id": "comedy-dessert",
         "timeOffsetMinutes": 135,
         "title": "Post-show walk or dessert",
-        "placeIndex": 2,
+        "placeId": "comedy-dessert-place",
         "description": "Optional extension if it goes well.",
         "canReplace": true
       }
@@ -587,6 +626,7 @@
     ],
     "places": [
       {
+        "id": "comedy-club",
         "name": "Helium Comedy Club Portland",
         "category": "Comedy show",
         "neighborhood": "Portland",
@@ -598,6 +638,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "comedy-food",
         "name": "The Sports Bra",
         "category": "Food and NA drink option",
         "neighborhood": "Portland",
@@ -609,6 +650,7 @@
         "warning": "Verify current hours, rating, and review count in Google Maps before leaving."
       },
       {
+        "id": "comedy-dessert-place",
         "name": "Rimsky-Korsakoffee House",
         "category": "Late dessert / coffee",
         "neighborhood": "Portland",
