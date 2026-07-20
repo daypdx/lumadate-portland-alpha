@@ -4,13 +4,22 @@ import { findAreaPairing, findVenueBackup, recommendCuratedVenues } from './lib/
 import { activePlacesProvider } from './providers/mockPlacesProvider'
 
 describe('curated Portland venue seed', () => {
-  it('contains at least 30 recommendable restaurants and cafes with unique stable IDs', () => {
+  it('contains a balanced 75–100 place catalog with unique stable IDs', () => {
     const ids = portlandVenues.map((venue) => venue.id)
     const names = portlandVenues.map((venue) => venue.name)
+    const kinds = recommendablePortlandVenues.map((venue) => venue.kind as string)
 
-    expect(recommendablePortlandVenues.length).toBeGreaterThanOrEqual(30)
+    expect(recommendablePortlandVenues.length).toBeGreaterThanOrEqual(75)
+    expect(recommendablePortlandVenues.length).toBeLessThanOrEqual(100)
+    expect(recommendablePortlandVenues.every((venue) => venue.status === 'active')).toBe(true)
+    expect(recommendablePortlandVenues.some((venue) => venue.id === 'tov-coffee-sunnyside')).toBe(false)
     expect(new Set(ids).size).toBe(ids.length)
     expect(new Set(names).size).toBe(names.length)
+    expect(kinds).toEqual(expect.arrayContaining(['restaurant', 'cafe', 'dessert', 'park', 'activity']))
+    expect(kinds.filter((kind) => kind === 'restaurant').length).toBeGreaterThanOrEqual(40)
+    expect(kinds.filter((kind) => kind === 'cafe' || kind === 'dessert').length).toBeGreaterThanOrEqual(12)
+    expect(kinds.filter((kind) => kind === 'park').length).toBeGreaterThanOrEqual(8)
+    expect(kinds.filter((kind) => kind === 'activity').length).toBeGreaterThanOrEqual(8)
     expect(names).toEqual(expect.arrayContaining([
       'Farmhouse Kitchen Thai Cuisine',
       'Piazza Italia',
@@ -19,9 +28,32 @@ describe('curated Portland venue seed', () => {
     ]))
   })
 
+  it('stores a location-specific public identity and compatible nearby stops for every place', () => {
+    const venueIds = new Set(portlandVenues.map((venue) => venue.id))
+
+    for (const venue of portlandVenues) {
+      const compatibleVenueIds = (venue as typeof venue & { compatibleVenueIds?: string[] }).compatibleVenueIds
+
+      expect(venue.id).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      expect(venue.neighborhood).not.toMatch(/multiple .* locations/i)
+      expect(venue.address, `${venue.name} should use a location-specific public address`).toBeTruthy()
+      expect(venue.websiteUrl, `${venue.name} should have an official public link`).toMatch(/^https:\/\//)
+      expect(venue.priceTierEstimate).toBeGreaterThanOrEqual(1)
+      expect(venue.priceTierEstimate).toBeLessThanOrEqual(4)
+      if (venue.kind === 'park') {
+        expect(venue.priceTierEstimate).toBe(1)
+        expect(venue.bookingType).toBe('free')
+      }
+      expect(compatibleVenueIds?.length ?? 0, `${venue.name} should have compatible nearby stops`).toBeGreaterThan(0)
+      expect(compatibleVenueIds?.every((id) => id !== venue.id && venueIds.has(id)) ?? false).toBe(true)
+      expect(compatibleVenueIds?.every((id) => portlandVenues.find((candidate) => candidate.id === id)?.area === venue.area) ?? false).toBe(true)
+      expect(compatibleVenueIds?.every((id) => portlandVenues.find((candidate) => candidate.id === id)?.status === 'active') ?? false).toBe(true)
+    }
+  })
+
   it('stores provenance and safe provider handoffs without live ratings or hours', () => {
     for (const venue of portlandVenues) {
-      expect(venue.verifiedAt).toBe('2026-07-17')
+      expect(venue.verifiedAt).toMatch(/^2026-07-(17|19)$/)
       expect(venue.sourceUrls.length).toBeGreaterThan(0)
       expect(venue.sourceUrls.every((url) => url.startsWith('https://'))).toBe(true)
       expect(venue.mapsUrl).toMatch(/^https:\/\/www\.google\.com\/maps\/search/)
@@ -62,9 +94,14 @@ describe('curated Portland venue seed', () => {
 
     for (const restaurant of restaurants) {
       const backup = findVenueBackup(restaurant)
+      const pairing = findAreaPairing(restaurant)
       expect(backup, `${restaurant.name} should have a backup`).toBeDefined()
       expect(backup?.area).toBe(restaurant.area)
-      expect(findAreaPairing(restaurant), `${restaurant.name} should have an area pairing`).toBeDefined()
+      expect(pairing, `${restaurant.name} should have an area pairing`).toBeDefined()
+      expect(
+        portlandVenues.some((candidate) => candidate.name === pairing?.name && (candidate.kind === 'park' || candidate.kind === 'activity')),
+        `${restaurant.name} should pair to a sourced catalog place`,
+      ).toBe(true)
     }
   })
 
@@ -130,6 +167,9 @@ describe('curated Portland venue seed', () => {
     })
 
     expect(results).toHaveLength(8)
+    const activeIds = new Set(recommendablePortlandVenues.map((venue) => venue.id))
+    expect(results.every((place) => activeIds.has(place.id))).toBe(true)
+    expect(results.some((place) => place.id === 'tov-coffee-sunnyside')).toBe(false)
     expect(results.every((place) => place.source === 'curated')).toBe(true)
     expect(results.every((place) => place.verificationRequired)).toBe(true)
     expect(results.every((place) => place.availabilitySummary.includes('not live'))).toBe(true)

@@ -2432,7 +2432,11 @@ function CuratedVenueCard({
         <span className="venue-kind">
           {venue.kind} · {venue.curationTier === 'editorial-consensus'
             ? 'multi-list consensus'
-            : venue.curationTier === 'founder-seed' ? 'founder seed' : 'current guide'}
+            : venue.curationTier === 'founder-seed'
+              ? 'founder seed'
+              : venue.curationTier === 'official-verified'
+                ? 'first-party verified'
+                : venue.curationTier === 'official-public' ? 'official-source destination' : 'current guide'}
         </span>
         <strong>{venue.name}</strong>
         <small>{venue.neighborhood} · {'$'.repeat(venue.priceTierEstimate)} editorial estimate</small>

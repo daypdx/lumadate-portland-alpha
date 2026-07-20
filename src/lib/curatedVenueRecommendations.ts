@@ -145,6 +145,18 @@ export function findVenueBackup(venue: CuratedVenue): CuratedVenue | undefined {
 }
 
 export function findAreaPairing(venue: CuratedVenue): AreaPairingIdea | undefined {
+  const sourcedPairing = venue.compatibleVenueIds
+    .map((id) => recommendablePortlandVenues.find((candidate) => candidate.id === id))
+    .find((candidate) => candidate?.kind === 'park' || candidate?.kind === 'activity')
+
+  if (sourcedPairing) {
+    return {
+      name: sourcedPairing.name,
+      kind: sourcedPairing.kind === 'park' ? 'park' : 'activity',
+      mapsUrl: sourcedPairing.mapsUrl,
+    }
+  }
+
   const options = areaPairingCatalog[venue.area]
   if (!options?.length) return undefined
   const venueIndex = recommendablePortlandVenues.findIndex((candidate) => candidate.id === venue.id)

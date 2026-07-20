@@ -5,6 +5,7 @@ This directory is the durable project record for the Portland controlled alpha. 
 ## Current source of truth
 
 - [Launch, ownership, funding, and cost playbook](launch/PORTLAND_ALPHA_LAUNCH_PLAYBOOK.md) — current launch verdict, founder-control rules, expense bands, funding order, legal/IP cautions, and next actions.
+- [Founder development roadmap](development/FOUNDER_DEVELOPMENT_ROADMAP.md) — stabilization sequence, human technical help, code-learning track, validation, funding, and eventual acquisition guidance.
 - [Architecture decision 0001](decisions/0001-portland-web-alpha-before-native.md) — why LumaDate is validating a Portland web alpha before live-data expansion or native apps.
 - [A/B and dogfood handoff](testing/ab-testing-codex-handoff.md) — repeatable review brief and regression priorities.
 - [2026-07-17 live Variant A baseline](testing/reports/2026-07-17-live-variant-a-baseline.md) — initial deployed landing-page findings and highest-value A/B questions.
