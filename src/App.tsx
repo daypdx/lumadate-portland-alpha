@@ -472,7 +472,12 @@ function parseStored<T>(key: string, fallback: T): T {
 }
 
 export function normalizeIntake(value: Intake): Intake {
-  return { ...defaultIntake, ...value, budgetMode: 'total' }
+  const merged = { ...defaultIntake, ...value, budgetMode: 'total' as const }
+  return {
+    ...merged,
+    dateStage: Object.hasOwn(dateStageLabels, merged.dateStage) ? merged.dateStage : 'first_date',
+    firstDateSafeMode: merged.firstDateSafeMode === true,
+  }
 }
 
 function intakeForStorage(value: Intake): Intake {
@@ -928,17 +933,30 @@ export function rankPlans(intake: Intake): RankedPlan[] {
     .slice(0, 3)
 }
 
+export function venueResolutionMatchesFor(
+  intake: Intake,
+  rankedPlans: RankedPlan[],
+): Record<string, CuratedVenueMatch[]> {
+  const normalizedIntake = normalizeIntake(intake)
+  return Object.fromEntries(rankedPlans.map((ranked) => [
+    ranked.plan.id,
+    curatedVenuesForPlan(normalizedIntake, ranked.plan, recommendablePortlandVenues.length),
+  ]))
+}
+
 export function aiCandidateInputsFor(intake: Intake, rankedPlans: RankedPlan[]): AiItineraryCandidate[] {
+  const normalizedIntake = normalizeIntake(intake)
+  const venueMatchesByPlan = venueResolutionMatchesFor(normalizedIntake, rankedPlans)
   return rankedPlans.map((ranked) => {
     const { plan } = ranked
-    const firstDateSafetyRequired = intake.firstDateSafeMode || intake.dateStage === 'first_date'
-    const alcoholCompatible = intake.alcoholPreference === 'alcohol_ok' || !plan.safetyProfile.alcoholCentric
+    const firstDateSafetyRequired = normalizedIntake.firstDateSafeMode || normalizedIntake.dateStage === 'first_date'
+    const alcoholCompatible = normalizedIntake.alcoholPreference === 'alcohol_ok' || !plan.safetyProfile.alcoholCentric
     const safetyEligible = plan.safetyProfile.publicPlace
       && (!firstDateSafetyRequired || plan.safetyProfile.goodForFirstDate)
       && alcoholCompatible
     const preferredKinds = preferredVenueKinds(plan)
-    const planArea = plan.neighborhoods[0] ?? intake.dateArea
-    const venueOptions = curatedVenuesForPlan(intake, plan, recommendablePortlandVenues.length)
+    const planArea = plan.neighborhoods[0] ?? normalizedIntake.dateArea
+    const venueOptions = (venueMatchesByPlan[plan.id] ?? [])
       .filter(({ venue }) => (
         areaLabelsMatch(planArea, venue.area)
         && preferredKinds.includes(venue.kind)
@@ -951,14 +969,14 @@ export function aiCandidateInputsFor(intake: Intake, rankedPlans: RankedPlan[]):
         available: true,
       }))
     const planTerms = new Set([...plan.tags, ...plan.interestKeywords].map((term) => term.toLowerCase()))
-    const structuredInterests = [...intake.activityTypes, ...intake.moodTypes]
+    const structuredInterests = [...normalizedIntake.activityTypes, ...normalizedIntake.moodTypes]
       .map((term) => term.toLowerCase())
     const quietRequested = structuredInterests.some((term) => (
       ['quiet', 'quiet_conversation', 'low_crowd', 'cozy_cafe', 'easy_exit'].includes(term)
     ))
     const quietFit = quietRequested && [...planTerms].some((term) => /quiet|low pressure|coffee|cafe|bookstore|park|walk/.test(term))
     const interestMatch = structuredInterests.some((term) => planTerms.has(term))
-    const weatherSafe = intake.indoorOutdoor === 'weather_safe' && plan.safetyProfile.indoor
+    const weatherSafe = normalizedIntake.indoorOutdoor === 'weather_safe' && plan.safetyProfile.indoor
     const reasonCodes: AiReasonCode[] = [
       ...(ranked.areaMatch ? ['AREA_MATCH' as const] : []),
       ...(ranked.budgetFits ? ['BUDGET_MATCH' as const] : []),
@@ -1009,11 +1027,16 @@ function App() {
 
   const rankedPlans = useMemo(() => rankPlans(intake), [intake])
   const active = rankedPlans.find((item) => item.plan.id === activeId) ?? rankedPlans[0]
+  const venueResolutionByPlan = useMemo(
+    () => venueResolutionMatchesFor(intake, rankedPlans),
+    [intake, rankedPlans],
+  )
   const venueSuggestionsByPlan = useMemo(() => Object.fromEntries(
-    rankedPlans.map((ranked) => [ranked.plan.id, curatedVenuesForPlan(intake, ranked.plan)]),
-  ) as Record<string, CuratedVenueMatch[]>, [intake, rankedPlans])
+    Object.entries(venueResolutionByPlan).map(([planId, matches]) => [planId, matches.slice(0, 4)]),
+  ) as Record<string, CuratedVenueMatch[]>, [venueResolutionByPlan])
   const venueSuggestions = venueSuggestionsByPlan[active.plan.id] ?? []
-  const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
+  const selectedVenueMatch = (venueResolutionByPlan[active.plan.id] ?? [])
+    .find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
     ?? automaticVenueForPlan(active.plan, venueSuggestions)
 
   useEffect(() => {
@@ -1100,9 +1123,9 @@ function App() {
   }
 
   function selectedVenueFor(ranked: RankedPlan): CuratedVenueMatch | undefined {
-    const matches = venueSuggestionsByPlan[ranked.plan.id] ?? []
+    const matches = venueResolutionByPlan[ranked.plan.id] ?? []
     return matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id])
-      ?? automaticVenueForPlan(ranked.plan, matches)
+      ?? automaticVenueForPlan(ranked.plan, venueSuggestionsByPlan[ranked.plan.id] ?? [])
   }
 
   function savePlan(ranked: RankedPlan) {
@@ -1336,7 +1359,7 @@ function App() {
               intake={intake}
               aiComposition={aiComposition}
               activeId={active.plan.id}
-              venuesByPlan={venueSuggestionsByPlan}
+              venuesByPlan={venueResolutionByPlan}
               selectedVenueByPlan={selectedVenueByPlan}
               saved={saved}
               onOpen={openPlan}

@@ -325,9 +325,12 @@ export function reasonCodesToCopy(reasonCodes: AiReasonCode[]): string {
 }
 
 function fallbackComposition(request: AiItineraryRequest): AiItineraryComposition {
-  const plans = request.candidates
+  const eligibleCandidates = request.candidates
     .filter((candidate) => candidate.areaMatch && candidate.budgetFits && candidate.safetyEligible)
-    .slice(0, MAX_SELECTED_PLANS)
+  const fallbackCandidates = eligibleCandidates.length > 0
+    ? eligibleCandidates.slice(0, MAX_SELECTED_PLANS)
+    : request.candidates.slice(0, 1)
+  const plans = fallbackCandidates
     .map((candidate) => ({
       planId: candidate.planId,
       venueId: candidate.venueOptions.find((venue) => venue.areaMatch && venue.categoryMatch && venue.available)?.venueId,

@@ -18,6 +18,7 @@ import {
   rankPlans,
   safetyText,
   trustedContactMessage,
+  venueResolutionMatchesFor,
   type DatePlan,
   type RankedPlan,
 } from './App'
@@ -183,6 +184,33 @@ describe('Portland alpha planning safeguards', () => {
       .toEqual(expect.arrayContaining(['QUIET_FIT', 'INTEREST_MATCH', 'BACKUP_AVAILABLE']))
     expect(candidates.find((candidate) => candidate.planId === 'coffee-art-low-pressure')?.reasonCodes)
       .toContain('WEATHER_SAFE')
+
+    const resolvableVenues = venueResolutionMatchesFor(intake, ranked)
+    expect(candidates.some((candidate) => candidate.venueOptions.length > 4)).toBe(true)
+    candidates.forEach((candidate) => {
+      const resolvedIds = new Set((resolvableVenues[candidate.planId] ?? []).map(({ venue }) => venue.id))
+      expect(candidate.venueOptions.every(({ venueId }) => resolvedIds.has(venueId))).toBe(true)
+    })
+  })
+
+  it('applies normalized first-date safety semantics to malformed persisted intake', () => {
+    const validIntake = {
+      ...createDefaultIntake(new Date(2026, 6, 17, 12, 0)),
+      dateStage: 'established' as const,
+      firstDateSafeMode: false,
+      alcoholPreference: 'alcohol_ok' as const,
+    }
+    const ranked = rankPlans(validIntake)
+    const unsafeForFirstDate = {
+      ...ranked[0],
+      plan: {
+        ...ranked[0].plan,
+        safetyProfile: { ...ranked[0].plan.safetyProfile, goodForFirstDate: false },
+      },
+    }
+    const malformedIntake = { ...validIntake, dateStage: 'malformed-persisted-value' as never }
+
+    expect(aiCandidateInputsFor(malformedIntake, [unsafeForFirstDate])[0].safetyEligible).toBe(false)
   })
 
   it('names the defining comedy venue as the plan anchor', () => {

@@ -567,7 +567,7 @@ describe('AI itinerary request boundary', () => {
     expect(errored.providerMode).toBe('fallback')
   })
 
-  it('returns no AI selection when no candidate is fully eligible', async () => {
+  it('preserves the deterministic first-ranked plan when no candidate is fully eligible', async () => {
     const request = createTestRequest()
     request.candidates = request.candidates.map((candidate) => ({
       ...candidate,
@@ -579,8 +579,8 @@ describe('AI itinerary request boundary', () => {
     const result = await composeAiItinerarySafely(request, mockItineraryComposer)
 
     expect(result.providerMode).toBe('fallback')
-    expect(result.primaryPlanId).toBe('')
-    expect(result.plans).toEqual([])
+    expect(result.primaryPlanId).toBe(request.candidates[0].planId)
+    expect(result.plans[0].planId).toBe(request.candidates[0].planId)
   })
 
   it('falls back to deterministic candidates when a composer returns invalid output', async () => {

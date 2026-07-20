@@ -133,7 +133,7 @@ An accepted `AiItineraryComposition` contains only:
 
 The validator rejects wrong schema versions, missing verification, invalid modes, unexpected fields, unknown or duplicate IDs, unapproved or duplicate reason codes, oversized IDs, oversized serialized output, empty plan arrays, and more than three selections.
 
-If no composer selection is valid, fallback returns the remaining eligible candidates in LumaDate's deterministic order. If no candidate is fully eligible, the composition contains no AI selection while the app's deterministic ranked results remain available. Hosted-provider failure must never block deterministic planning.
+If no composer selection is valid, fallback returns eligible candidates in LumaDate's deterministic order. If no candidate is fully eligible, fallback preserves LumaDate's deterministic first-ranked plan rather than returning an invalid empty composition. Hosted-provider failure must never block deterministic planning.
 
 ## Code map
 
