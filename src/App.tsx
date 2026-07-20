@@ -9,6 +9,12 @@ import {
   type CuratedVenueMatch,
 } from './lib/curatedVenueRecommendations'
 import { mockWeatherAtArrival } from './lib/mockItinerarySignals'
+import {
+  composeAiItinerarySafely,
+  createAiItineraryRequest,
+  mockItineraryComposer,
+  type AiItineraryComposition,
+} from './ai/itineraryComposer'
 import './App.css'
 
 type MeetingMode = 'near_me' | 'near_them' | 'fair_midpoint' | 'neutral_public'
@@ -937,6 +943,7 @@ function App() {
   )
   const [saved, setSaved] = useState<SavedItinerary[]>(() => parseStored(storageKeys.saved, []))
   const [selectedVenueByPlan, setSelectedVenueByPlan] = useState<Record<string, string>>({})
+  const [aiComposition, setAiComposition] = useState<AiItineraryComposition | null>(null)
   const entryTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   const rankedPlans = useMemo(() => rankPlans(intake), [intake])
@@ -1061,9 +1068,32 @@ function App() {
     showToast(`${ranked.plan.title} saved for later`)
   }
 
-  function showItinerary() {
+  async function showItinerary() {
+    const request = createAiItineraryRequest({
+      intake,
+      candidates: rankedPlans.map((ranked) => ({
+        planId: ranked.plan.id,
+        title: ranked.plan.title,
+        score: ranked.score,
+        estimatedCostHigh: ranked.estimatedCostHigh,
+        durationMinutes: ranked.plan.estimatedDurationMinutes,
+        venueIds: (venueSuggestionsByPlan[ranked.plan.id] ?? []).map(({ venue }) => venue.id),
+        reasons: ranked.reasons,
+        warnings: ranked.warnings,
+      })),
+    })
+    const composition = await composeAiItinerarySafely(request, mockItineraryComposer)
+    const composedVenueSelections = Object.fromEntries(
+      composition.plans
+        .filter((plan): plan is typeof plan & { venueId: string } => Boolean(plan.venueId))
+        .map((plan) => [plan.planId, plan.venueId]),
+    )
+
+    setAiComposition(composition)
+    setSelectedVenueByPlan((current) => ({ ...current, ...composedVenueSelections }))
+    if (composition.primaryPlanId) setActiveId(composition.primaryPlanId)
     setTab('options')
-    showToast('Plans generated - pick one to inspect.')
+    showToast('Safe mock composition generated - pick one to inspect.')
     window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
   }
 
@@ -1124,6 +1154,7 @@ function App() {
     setIntake(nextIntake)
     setExperienceMode('personal')
     setSelectedVenueByPlan({})
+    setAiComposition(null)
     setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('plan')
@@ -1142,6 +1173,7 @@ function App() {
     setIntake(nextIntake)
     setExperienceMode('demo')
     setSelectedVenueByPlan({})
+    setAiComposition(null)
     setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('options')
@@ -1156,6 +1188,7 @@ function App() {
     setIntake(createDefaultIntake())
     setExperienceMode('personal')
     setSelectedVenueByPlan({})
+    setAiComposition(null)
     setSaved([])
     setReminders(defaultReminders)
     showToast('Planning data cleared')
@@ -1241,6 +1274,7 @@ function App() {
             <ResultsPanel
               rankedPlans={rankedPlans}
               intake={intake}
+              aiComposition={aiComposition}
               activeId={active.plan.id}
               venuesByPlan={venueSuggestionsByPlan}
               selectedVenueByPlan={selectedVenueByPlan}
@@ -2276,6 +2310,7 @@ function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step:
 function ResultsPanel({
   rankedPlans,
   intake,
+  aiComposition,
   activeId,
   venuesByPlan,
   selectedVenueByPlan,
@@ -2286,6 +2321,7 @@ function ResultsPanel({
 }: {
   rankedPlans: RankedPlan[]
   intake: Intake
+  aiComposition: AiItineraryComposition | null
   activeId: string
   venuesByPlan: Record<string, CuratedVenueMatch[]>
   selectedVenueByPlan: Record<string, string>
@@ -2301,6 +2337,13 @@ function ResultsPanel({
         <h2>Three ways the date could go.</h2>
         <p>Open one, save it for later, or adjust it without changing the other options.</p>
       </div>
+      {aiComposition && (
+        <div className="itinerary-verification-note ai-composition-note" role="status" aria-label="AI composition summary">
+          <span className="eyebrow">AI foundation preview</span>
+          <strong>Safe mock — no hosted model or API key is connected.</strong>
+          <p>{aiComposition.summary} LumaDate still controls every plan and venue shown below.</p>
+        </div>
+      )}
       <div className="alpha-plan-ribbon">Curated Portland suggestions. Verify current hours, routes, prices, and availability.</div>
       <div className="result-list">
         {rankedPlans.map((ranked, index) => {
@@ -2308,6 +2351,7 @@ function ResultsPanel({
           const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id])
             ?? automaticVenueForPlan(ranked.plan, venues)
           const canonical = canonicalPlanFor(ranked, intake, venue)
+          const composedPlan = aiComposition?.plans.find((plan) => plan.planId === ranked.plan.id)
           const isSaved = saved.some((item) => (
             item.planId === ranked.plan.id && (item.venueId ?? '') === (venue?.venue.id ?? '')
           ))
@@ -2329,7 +2373,7 @@ function ResultsPanel({
                 <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
                 <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
               </dl>
-              <p className="result-reason">{ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
+              <p className="result-reason">{composedPlan?.explanation ?? ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
               {ranked.warnings.length > 0 && (
                 <div className="result-warnings" aria-label="Plan tradeoffs">
                   {ranked.warnings.map((warning) => <span key={warning}>{warning}</span>)}

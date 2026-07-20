@@ -12,6 +12,7 @@ This directory is the durable project record for the Portland controlled alpha. 
 - [2026-07-17 thorough A/B and dogfood QA](testing/reports/2026-07-17-thorough-live-ab-dogfood.md) — completed full-funnel findings, launch gates, persona projections, and Variant B direction.
 - [2026-07-17 technical verification](testing/reports/2026-07-17-technical-verification.md) — commands and results supporting the current alpha verdict.
 - [Portland curated venue seed](data/PORTLAND_VENUE_SEED.md) — researched restaurant/café inventory, provenance rules, app behavior, and refresh policy.
+- [Provider-neutral AI itinerary foundation](ai/PROVIDER_NEUTRAL_AI_FOUNDATION.md) — safe mock composer, privacy boundary, output validation, deterministic fallback, and hosted-provider handoff rules.
 
 ## Product definition
 

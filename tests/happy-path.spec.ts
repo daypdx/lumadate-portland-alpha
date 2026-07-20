@@ -189,6 +189,21 @@ test('the selected plan keeps one venue schedule across itinerary, invite, safet
   await expectNoHorizontalOverflow(page)
 })
 
+test('guided generation discloses the provider-neutral mock AI composition', async ({ page }) => {
+  await acknowledgeAndEnter(page, 'Build my date plan')
+
+  for (let step = 0; step < 6; step += 1) {
+    await page.getByRole('button', { name: 'Next' }).click()
+  }
+  await page.getByRole('button', { name: 'Generate options' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
+  await expect(page.getByText('AI foundation preview')).toBeVisible()
+  await expect(page.getByText('Safe mock — no hosted model or API key is connected.')).toBeVisible()
+  await expect(page.getByLabel('AI composition summary')).toContainText('approved candidates')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('Help me leave separates calm exits, trusted-contact urgency, and emergency guidance', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'share', {
