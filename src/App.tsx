@@ -13,6 +13,7 @@ import {
   composeAiItinerarySafely,
   createAiItineraryRequest,
   mockItineraryComposer,
+  reasonCodesToCopy,
   type AiItineraryComposition,
 } from './ai/itineraryComposer'
 import './App.css'
@@ -2340,8 +2341,8 @@ function ResultsPanel({
       {aiComposition && (
         <div className="itinerary-verification-note ai-composition-note" role="status" aria-label="AI composition summary">
           <span className="eyebrow">AI foundation preview</span>
-          <strong>Safe mock — no hosted model or API key is connected.</strong>
-          <p>{aiComposition.summary} LumaDate still controls every plan and venue shown below.</p>
+          <strong>AI foundation preview — safe mock, no hosted model connected</strong>
+          <p>LumaDate controls every plan, venue, and visible explanation shown below.</p>
         </div>
       )}
       <div className="alpha-plan-ribbon">Curated Portland suggestions. Verify current hours, routes, prices, and availability.</div>
@@ -2373,7 +2374,7 @@ function ResultsPanel({
                 <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
                 <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
               </dl>
-              <p className="result-reason">{composedPlan?.explanation ?? ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
+              <p className="result-reason">{composedPlan ? reasonCodesToCopy(composedPlan.reasonCodes) : ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
               {ranked.warnings.length > 0 && (
                 <div className="result-warnings" aria-label="Plan tradeoffs">
                   {ranked.warnings.map((warning) => <span key={warning}>{warning}</span>)}

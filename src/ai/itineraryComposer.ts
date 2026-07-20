@@ -96,14 +96,13 @@ export type AiItineraryRequest = {
 export type AiComposedPlan = {
   planId: string
   venueId?: string
-  explanation: string
+  reasonCodes: AiReasonCode[]
 }
 
 export type AiItineraryComposition = {
   schemaVersion: 1
   providerMode: 'mock' | 'hosted' | 'fallback'
   primaryPlanId: string
-  summary: string
   plans: AiComposedPlan[]
   verificationRequired: true
 }
@@ -113,38 +112,160 @@ export type AiItineraryValidation = {
   errors: string[]
 }
 
+const MAX_RESPONSE_CHARACTERS = 4096
+const MAX_SELECTED_PLANS = 3
+const MAX_REASON_CODES_PER_PLAN = 7
+const MAX_IDENTIFIER_CHARACTERS = 120
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function unexpectedKeys(value: Record<string, unknown>, allowed: string[], scope: string): string[] {
+  const allowedKeys = new Set(allowed)
+  return Object.keys(value)
+    .filter((key) => !allowedKeys.has(key))
+    .map((key) => `Unexpected response field "${key}" in ${scope}.`)
+}
+
 export function validateAiItineraryComposition(
   request: AiItineraryRequest,
-  composition: AiItineraryComposition,
+  composition: unknown,
 ): AiItineraryValidation {
   const errors: string[] = []
+  let serialized = ''
+  try {
+    serialized = JSON.stringify(composition) ?? ''
+  } catch {
+    errors.push('Response could not be serialized.')
+  }
+  if (serialized.length > MAX_RESPONSE_CHARACTERS) {
+    errors.push(`Response exceeds the ${MAX_RESPONSE_CHARACTERS}-character size limit.`)
+  }
+  if (!isRecord(composition)) {
+    errors.push('Response must be a JSON object.')
+    return { valid: false, errors }
+  }
+
+  errors.push(...unexpectedKeys(
+    composition,
+    ['schemaVersion', 'providerMode', 'primaryPlanId', 'plans', 'verificationRequired'],
+    'composition',
+  ))
+  if (composition.schemaVersion !== 1) {
+    errors.push('schemaVersion must equal 1.')
+  }
+  if (!['mock', 'hosted', 'fallback'].includes(String(composition.providerMode))) {
+    errors.push('providerMode is invalid.')
+  }
+  if (composition.verificationRequired !== true) {
+    errors.push('verificationRequired must equal true.')
+  }
+  if (typeof composition.primaryPlanId !== 'string' || composition.primaryPlanId.length === 0) {
+    errors.push('primaryPlanId must be a non-empty string.')
+  } else if (composition.primaryPlanId.length > MAX_IDENTIFIER_CHARACTERS) {
+    errors.push('primaryPlanId exceeds the identifier length limit.')
+  }
+  if (!Array.isArray(composition.plans)) {
+    errors.push('plans must be an array.')
+    return { valid: false, errors }
+  }
+  if (composition.plans.length === 0) {
+    errors.push('Response must contain at least one plan.')
+  }
+  if (composition.plans.length > MAX_SELECTED_PLANS) {
+    errors.push(`Response may contain at most ${MAX_SELECTED_PLANS} plans.`)
+  }
+  if (composition.plans.length > request.candidates.length) {
+    errors.push('Response contains more plans than the supplied candidates.')
+  }
+
   const candidates = new Map(request.candidates.map((candidate) => [candidate.planId, candidate]))
+  const selectedPlanIds = new Set<string>()
+  const selectedVenueIds = new Set<string>()
 
-  if (!candidates.has(composition.primaryPlanId)) {
-    errors.push(`Unknown plan ID: ${composition.primaryPlanId || '(empty)'}.`)
-  }
+  for (const [index, value] of composition.plans.entries()) {
+    if (!isRecord(value)) {
+      errors.push(`Plan selection ${index + 1} must be an object.`)
+      continue
+    }
+    errors.push(...unexpectedKeys(value, ['planId', 'venueId', 'reasonCodes'], `plan selection ${index + 1}`))
 
-  for (const plan of composition.plans) {
-    const candidate = candidates.get(plan.planId)
+    const planId = typeof value.planId === 'string' ? value.planId : ''
+    if (!planId) {
+      errors.push(`Plan selection ${index + 1} requires a planId.`)
+    } else if (planId.length > MAX_IDENTIFIER_CHARACTERS) {
+      errors.push(`Plan ID ${index + 1} exceeds the identifier length limit.`)
+    }
+    if (selectedPlanIds.has(planId)) {
+      errors.push(`Duplicate plan ID: ${planId}.`)
+    }
+    selectedPlanIds.add(planId)
+
+    const candidate = candidates.get(planId)
     if (!candidate) {
-      errors.push(`Unknown plan ID: ${plan.planId || '(empty)'}.`)
+      errors.push(`Unknown plan ID: ${planId || '(empty)'}.`)
+    } else {
+      if (!candidate.areaMatch) errors.push(`Plan ${planId} fails area eligibility.`)
+      if (!candidate.budgetFits) errors.push(`Plan ${planId} fails budget eligibility.`)
+      if (!candidate.safetyEligible) errors.push(`Plan ${planId} fails safety eligibility.`)
     }
-    if (plan.venueId && !candidate?.venueOptions.some((venue) => venue.venueId === plan.venueId)) {
-      errors.push(`Unknown venue ID: ${plan.venueId}.`)
+
+    if (!Array.isArray(value.reasonCodes)) {
+      errors.push(`Plan ${planId || index + 1} requires a reasonCodes array.`)
+    } else {
+      if (value.reasonCodes.length > MAX_REASON_CODES_PER_PLAN) {
+        errors.push(`Plan ${planId || index + 1} exceeds the reason-code limit.`)
+      }
+      const seenReasonCodes = new Set<string>()
+      for (const reasonCode of value.reasonCodes) {
+        if (typeof reasonCode !== 'string' || !isAiReasonCode(reasonCode)) {
+          errors.push(`Unknown reason code: ${String(reasonCode)}.`)
+          continue
+        }
+        if (seenReasonCodes.has(reasonCode)) {
+          errors.push(`Duplicate reason code: ${reasonCode}.`)
+        }
+        seenReasonCodes.add(reasonCode)
+        if (candidate && !candidate.reasonCodes.includes(reasonCode)) {
+          errors.push(`Reason code ${reasonCode} is not approved for plan ${planId}.`)
+        }
+      }
+    }
+
+    if (value.venueId !== undefined) {
+      if (typeof value.venueId !== 'string' || value.venueId.length === 0) {
+        errors.push(`Venue ID for plan ${planId || index + 1} must be a non-empty string.`)
+      } else {
+        const venueId = value.venueId
+        if (venueId.length > MAX_IDENTIFIER_CHARACTERS) {
+          errors.push(`Venue ID ${venueId} exceeds the identifier length limit.`)
+        }
+        if (selectedVenueIds.has(venueId)) {
+          errors.push(`Duplicate venue ID: ${venueId}.`)
+        }
+        selectedVenueIds.add(venueId)
+        const venue = candidate?.venueOptions.find((option) => option.venueId === venueId)
+        if (!venue) {
+          errors.push(`Unknown venue ID: ${venueId}.`)
+        } else {
+          if (!venue.areaMatch) errors.push(`Venue ${venueId} fails area compatibility.`)
+          if (!venue.categoryMatch) errors.push(`Venue ${venueId} fails category compatibility.`)
+          if (!venue.available) errors.push(`Venue ${venueId} is unavailable.`)
+        }
+      }
     }
   }
 
-  const authoredText = [composition.summary, ...composition.plans.map((plan) => plan.explanation)].join(' ')
-  const streetLikeAddress = /\b\d{1,6}\s+(?:[a-z0-9.'-]+\s+){0,5}(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|court|ct|way)\b/i
-  if (streetLikeAddress.test(authoredText)) {
-    errors.push('Street-like address found in model-authored text.')
+  if (typeof composition.primaryPlanId === 'string' && !selectedPlanIds.has(composition.primaryPlanId)) {
+    errors.push('Primary plan must appear in the returned plan list.')
   }
 
   return { valid: errors.length === 0, errors }
 }
 
 export interface ItineraryComposer {
-  compose(request: AiItineraryRequest): Promise<AiItineraryComposition>
+  compose(request: AiItineraryRequest): Promise<unknown>
 }
 
 const reasonCodeCopy: Record<AiReasonCode, string> = {
@@ -157,22 +278,21 @@ const reasonCodeCopy: Record<AiReasonCode, string> = {
   BACKUP_AVAILABLE: 'Includes a compatible backup.',
 }
 
-function fixedExplanation(reasonCodes: AiReasonCode[]): string {
-  return reasonCodes.slice(0, 2).map((code) => reasonCodeCopy[code]).join(' ') || 'Approved LumaDate candidate.'
+export function reasonCodesToCopy(reasonCodes: AiReasonCode[]): string {
+  return reasonCodes.slice(0, 3).map((code) => reasonCodeCopy[code]).join(' ') || 'Approved LumaDate candidate.'
 }
 
 function fallbackComposition(request: AiItineraryRequest): AiItineraryComposition {
-  const plans = request.candidates.map((candidate) => ({
+  const plans = request.candidates.slice(0, MAX_SELECTED_PLANS).map((candidate) => ({
     planId: candidate.planId,
-    venueId: candidate.venueOptions.find((venue) => venue.available)?.venueId,
-    explanation: fixedExplanation(candidate.reasonCodes),
+    venueId: candidate.venueOptions.find((venue) => venue.areaMatch && venue.categoryMatch && venue.available)?.venueId,
+    reasonCodes: [...candidate.reasonCodes].slice(0, MAX_REASON_CODES_PER_PLAN),
   }))
 
   return {
     schemaVersion: 1,
     providerMode: 'fallback',
     primaryPlanId: plans[0]?.planId ?? '',
-    summary: 'AI composition was unavailable, so LumaDate used its safe LumaDate fallback.',
     plans,
     verificationRequired: true,
   }
@@ -181,37 +301,47 @@ function fallbackComposition(request: AiItineraryRequest): AiItineraryCompositio
 export async function composeAiItinerarySafely(
   request: AiItineraryRequest,
   composer: ItineraryComposer,
+  options: { timeoutMs?: number } = {},
 ): Promise<AiItineraryComposition> {
+  const timeoutMs = Math.max(1, options.timeoutMs ?? 2000)
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   try {
-    const composition = await composer.compose(request)
+    const composition = await Promise.race([
+      composer.compose(request),
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error('Composer timed out.')), timeoutMs)
+      }),
+    ])
     return validateAiItineraryComposition(request, composition).valid
-      ? composition
+      ? composition as AiItineraryComposition
       : fallbackComposition(request)
   } catch {
     return fallbackComposition(request)
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
   }
 }
 
-export const mockItineraryComposer: ItineraryComposer = {
-  async compose(request) {
-    const plans = request.candidates.map((candidate) => ({
-      planId: candidate.planId,
-      venueId: candidate.venueOptions.find((venue) => venue.available)?.venueId,
-      explanation: fixedExplanation(candidate.reasonCodes),
-    }))
+export const mockItineraryComposer = {
+  async compose(request: AiItineraryRequest): Promise<AiItineraryComposition> {
+    const plans = request.candidates
+      .filter((candidate) => candidate.areaMatch && candidate.budgetFits && candidate.safetyEligible)
+      .slice(0, MAX_SELECTED_PLANS)
+      .map((candidate) => ({
+        planId: candidate.planId,
+        venueId: candidate.venueOptions.find((venue) => venue.areaMatch && venue.categoryMatch && venue.available)?.venueId,
+        reasonCodes: [...candidate.reasonCodes].slice(0, MAX_REASON_CODES_PER_PLAN),
+      }))
 
     return {
       schemaVersion: 1,
       providerMode: 'mock',
       primaryPlanId: plans[0]?.planId ?? '',
-      summary: plans[0]
-        ? "Mock composition selected from LumaDate's approved candidates."
-        : 'No approved itinerary candidates were available.',
       plans,
       verificationRequired: true,
     }
   },
-}
+} satisfies ItineraryComposer
 
 const allowedReasonCodes = new Set<AiReasonCode>([
   'AREA_MATCH',
