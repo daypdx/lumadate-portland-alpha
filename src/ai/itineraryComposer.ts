@@ -37,14 +37,13 @@ export type AiItineraryCandidateInput = {
   score?: number
   estimatedCostHigh: number
   durationMinutes: number
-  venueIds?: string[]
   reasons?: string[]
   warnings?: string[]
-  areaMatch?: boolean
-  budgetFits?: boolean
-  safetyEligible?: boolean
-  venueOptions?: AiVenueOption[]
-  reasonCodes?: string[]
+  areaMatch: boolean
+  budgetFits: boolean
+  safetyEligible: boolean
+  venueOptions: AiVenueOption[]
+  reasonCodes: string[]
 }
 
 export type AiIntakeInput = {
@@ -74,8 +73,6 @@ export type AiIntakeInput = {
 export type AiPreferences = {
   dateArea: string
   dateStage: string
-  dateStart: string
-  dateEnd: string
   endMode: string
   budgetMax: number
   foodWanted: string
@@ -120,11 +117,44 @@ export type AiItineraryValidation = {
 
 const MAX_RESPONSE_CHARACTERS = 4096
 const MAX_SELECTED_PLANS = 3
+const MAX_VENUE_OPTIONS_PER_PLAN = 8
 const MAX_REASON_CODES_PER_PLAN = 7
 const MAX_IDENTIFIER_CHARACTERS = 120
+const MAX_TAGGING_INPUT_CHARACTERS = 2000
+const identifierPattern = /^[a-z0-9][a-z0-9-]{0,79}$/
+
+const allowedDateAreas = new Set([
+  'Portland',
+  'SE Portland',
+  'NE Portland',
+  'NW Portland',
+  'Downtown Portland',
+  'Pearl District',
+  'Alberta Arts District',
+  'Mississippi / Williams',
+  'Sellwood / Moreland',
+])
+const allowedDateStages = new Set(['first_date', 'early_dating', 'established', 'anniversary', 'friend_date'])
+const allowedEndModes = new Set(['fixed_end', 'flexible', 'open_ended'])
+const allowedFoodPreferences = new Set(['yes', 'maybe', 'no'])
+const allowedAlcoholPreferences = new Set(['alcohol_ok', 'no_alcohol', 'mocktail_friendly', 'avoid_bars'])
+const allowedIndoorOutdoorPreferences = new Set(['indoor', 'outdoor', 'either', 'weather_safe'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function allowlistedValue(value: unknown, allowed: Set<string>, fallback: string): string {
+  return typeof value === 'string' && allowed.has(value) ? value : fallback
+}
+
+function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.min(maximum, Math.max(minimum, Math.round(value)))
+}
+
+function isIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && identifierPattern.test(value)
 }
 
 function unexpectedKeys(value: Record<string, unknown>, allowed: string[], scope: string): string[] {
@@ -266,6 +296,12 @@ export function validateAiItineraryComposition(
   if (typeof composition.primaryPlanId === 'string' && !selectedPlanIds.has(composition.primaryPlanId)) {
     errors.push('Primary plan must appear in the returned plan list.')
   }
+  const authoritativePrimary = request.candidates.find((candidate) => (
+    candidate.areaMatch && candidate.budgetFits && candidate.safetyEligible
+  ))
+  if (authoritativePrimary && composition.primaryPlanId !== authoritativePrimary.planId) {
+    errors.push('Primary plan must preserve LumaDate\'s authoritative first eligible plan.')
+  }
 
   return { valid: errors.length === 0, errors }
 }
@@ -289,11 +325,14 @@ export function reasonCodesToCopy(reasonCodes: AiReasonCode[]): string {
 }
 
 function fallbackComposition(request: AiItineraryRequest): AiItineraryComposition {
-  const plans = request.candidates.slice(0, MAX_SELECTED_PLANS).map((candidate) => ({
-    planId: candidate.planId,
-    venueId: candidate.venueOptions.find((venue) => venue.areaMatch && venue.categoryMatch && venue.available)?.venueId,
-    reasonCodes: [...candidate.reasonCodes].slice(0, MAX_REASON_CODES_PER_PLAN),
-  }))
+  const plans = request.candidates
+    .filter((candidate) => candidate.areaMatch && candidate.budgetFits && candidate.safetyEligible)
+    .slice(0, MAX_SELECTED_PLANS)
+    .map((candidate) => ({
+      planId: candidate.planId,
+      venueId: candidate.venueOptions.find((venue) => venue.areaMatch && venue.categoryMatch && venue.available)?.venueId,
+      reasonCodes: [...candidate.reasonCodes].slice(0, MAX_REASON_CODES_PER_PLAN),
+    }))
 
   return {
     schemaVersion: 1,
@@ -429,8 +468,9 @@ const approvedActivityTags = new Set([
 ])
 const approvedMoodTags = new Set(['chill', 'romantic', 'playful', 'adventurous', 'social', 'quiet'])
 
-function textForTagging(value: string): string {
-  return value
+function textForTagging(value: unknown): string {
+  const bounded = typeof value === 'string' ? value.slice(0, MAX_TAGGING_INPUT_CHARACTERS) : ''
+  return bounded
     .toLowerCase()
     .replace(/https?:\/\/\S+|www\.\S+/g, ' ')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, ' ')
@@ -450,8 +490,74 @@ function approvedTags(value: string, rules: TagRule[], limit = 12): string[] {
     .slice(0, limit)
 }
 
-function approvedStructuredTags(values: string[], catalog: Set<string>): string[] {
-  return [...new Set(values.map((value) => value.toLowerCase().trim()).filter((value) => catalog.has(value)))].slice(0, 16)
+function approvedStructuredTags(values: unknown, catalog: Set<string>): string[] {
+  if (!Array.isArray(values)) return []
+  return [...new Set(values
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.toLowerCase().trim())
+    .filter((value) => catalog.has(value)))]
+    .slice(0, 16)
+}
+
+function safeCandidates(values: unknown): AiItineraryCandidate[] {
+  if (!Array.isArray(values)) return []
+  const result: AiItineraryCandidate[] = []
+  const seenPlanIds = new Set<string>()
+
+  for (const value of values.slice(0, MAX_SELECTED_PLANS)) {
+    if (!isRecord(value) || !isIdentifier(value.planId) || seenPlanIds.has(value.planId)) continue
+    if (
+      typeof value.areaMatch !== 'boolean'
+      || typeof value.budgetFits !== 'boolean'
+      || typeof value.safetyEligible !== 'boolean'
+      || typeof value.estimatedCostHigh !== 'number'
+      || !Number.isFinite(value.estimatedCostHigh)
+      || value.estimatedCostHigh < 0
+      || value.estimatedCostHigh > 1000
+      || typeof value.durationMinutes !== 'number'
+      || !Number.isFinite(value.durationMinutes)
+      || value.durationMinutes < 1
+      || value.durationMinutes > 1440
+      || !Array.isArray(value.venueOptions)
+      || !Array.isArray(value.reasonCodes)
+    ) continue
+
+    const seenVenueIds = new Set<string>()
+    const venueOptions: AiVenueOption[] = []
+    for (const venue of value.venueOptions.slice(0, MAX_VENUE_OPTIONS_PER_PLAN)) {
+      if (
+        !isRecord(venue)
+        || !isIdentifier(venue.venueId)
+        || seenVenueIds.has(venue.venueId)
+        || venue.areaMatch !== true
+        || venue.categoryMatch !== true
+        || venue.available !== true
+      ) continue
+      seenVenueIds.add(venue.venueId)
+      venueOptions.push({
+        venueId: venue.venueId,
+        areaMatch: true,
+        categoryMatch: true,
+        available: true,
+      })
+    }
+
+    seenPlanIds.add(value.planId)
+    result.push({
+      planId: value.planId,
+      estimatedCostHigh: Math.round(value.estimatedCostHigh),
+      durationMinutes: Math.round(value.durationMinutes),
+      areaMatch: value.areaMatch,
+      budgetFits: value.budgetFits,
+      safetyEligible: value.safetyEligible,
+      venueOptions,
+      reasonCodes: [...new Set(value.reasonCodes
+        .filter((reasonCode): reasonCode is AiReasonCode => typeof reasonCode === 'string' && isAiReasonCode(reasonCode)))]
+        .slice(0, MAX_REASON_CODES_PER_PLAN),
+    })
+  }
+
+  return result
 }
 
 export function createAiItineraryRequest({
@@ -464,19 +570,17 @@ export function createAiItineraryRequest({
   return {
     schemaVersion: 1,
     preferences: {
-      dateArea: intake.dateArea,
-      dateStage: intake.dateStage,
-      dateStart: intake.dateStart,
-      dateEnd: intake.dateEnd,
-      endMode: intake.endMode,
-      budgetMax: intake.budgetMax,
-      foodWanted: intake.foodWanted,
-      alcoholPreference: intake.alcoholPreference,
-      indoorOutdoor: intake.indoorOutdoor,
-      energyLevel: intake.energyLevel,
-      romanceLevel: intake.romanceLevel,
-      crowdComfort: intake.crowdComfort,
-      firstDateSafeMode: intake.firstDateSafeMode,
+      dateArea: allowlistedValue(intake.dateArea, allowedDateAreas, 'Portland'),
+      dateStage: allowlistedValue(intake.dateStage, allowedDateStages, 'first_date'),
+      endMode: allowlistedValue(intake.endMode, allowedEndModes, 'flexible'),
+      budgetMax: boundedNumber(intake.budgetMax, 0, 1000, 120),
+      foodWanted: allowlistedValue(intake.foodWanted, allowedFoodPreferences, 'maybe'),
+      alcoholPreference: allowlistedValue(intake.alcoholPreference, allowedAlcoholPreferences, 'no_alcohol'),
+      indoorOutdoor: allowlistedValue(intake.indoorOutdoor, allowedIndoorOutdoorPreferences, 'either'),
+      energyLevel: boundedNumber(intake.energyLevel, 1, 5, 3),
+      romanceLevel: boundedNumber(intake.romanceLevel, 1, 5, 3),
+      crowdComfort: boundedNumber(intake.crowdComfort, 1, 5, 3),
+      firstDateSafeMode: intake.firstDateSafeMode === true,
       activityTags: approvedStructuredTags(intake.activityTypes, approvedActivityTags),
       moodTags: approvedStructuredTags(intake.moodTypes, approvedMoodTags),
       interestTags: approvedTags(`${intake.dateEnjoysText} ${intake.userEnjoysText}`, interestTagRules),
@@ -484,35 +588,6 @@ export function createAiItineraryRequest({
       dietaryTags: approvedTags(intake.dietaryLimits, dietaryTagRules),
       avoidTags: approvedTags(intake.mustAvoid, avoidTagRules),
     },
-    candidates: candidates.map((candidate) => {
-      const areaMatch = candidate.areaMatch ?? true
-      const budgetFits = candidate.budgetFits ?? true
-      const safetyEligible = candidate.safetyEligible ?? true
-      const venueOptions = candidate.venueOptions
-        ?? (candidate.venueIds ?? []).map((venueId) => ({
-          venueId,
-          areaMatch: true,
-          categoryMatch: true,
-          available: true,
-        }))
-      const defaultReasonCodes: AiReasonCode[] = [
-        ...(areaMatch ? ['AREA_MATCH' as const] : []),
-        ...(budgetFits ? ['BUDGET_MATCH' as const] : []),
-        ...(safetyEligible ? ['FIRST_DATE_SAFE' as const] : []),
-      ]
-
-      return {
-        planId: candidate.planId,
-        estimatedCostHigh: candidate.estimatedCostHigh,
-        durationMinutes: candidate.durationMinutes,
-        areaMatch,
-        budgetFits,
-        safetyEligible,
-        venueOptions: venueOptions
-          .filter((venue) => venue.areaMatch && venue.categoryMatch)
-          .map((venue) => ({ ...venue })),
-        reasonCodes: [...new Set((candidate.reasonCodes ?? defaultReasonCodes).filter(isAiReasonCode))].slice(0, 7),
-      }
-    }),
+    candidates: safeCandidates(candidates),
   }
 }

@@ -203,9 +203,11 @@ test('guided generation remains deterministic unless the internal mock preview i
 
   await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
   await expect(page.getByLabel('AI composition summary')).toHaveCount(0)
+  await expect(page.getByText('AI foundation preview — safe mock, no hosted model connected', { exact: true })).toHaveCount(0)
 })
 
 test('internal mock preview discloses the provider-neutral AI composition', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   await acknowledgeAndEnter(page, 'Build my date plan', '/?aiPreview=mock')
 
   for (let step = 0; step < 6; step += 1) {
@@ -215,9 +217,21 @@ test('internal mock preview discloses the provider-neutral AI composition', asyn
 
   await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
   const aiSummary = page.getByLabel('AI composition summary')
-  await expect(aiSummary.getByText('AI foundation preview', { exact: true })).toBeVisible()
-  await expect(aiSummary).toContainText('safe mock, no hosted model connected')
+  await expect(aiSummary.getByText('AI foundation preview — safe mock, no hosted model connected', { exact: true })).toBeVisible()
   await expect(aiSummary).toContainText('controls every plan, venue, and visible explanation')
+
+  const primaryPlanId = await aiSummary.getAttribute('data-primary-plan-id')
+  expect(primaryPlanId).toBeTruthy()
+  const selectedCard = page.locator('article.result-card.selected')
+  await expect(selectedCard).toHaveAttribute('data-plan-id', primaryPlanId!)
+  const aiVenueId = await selectedCard.getAttribute('data-ai-venue-id')
+  expect(aiVenueId).toBeTruthy()
+  await expect(selectedCard).toHaveAttribute('data-venue-id', aiVenueId!)
+
+  await selectedCard.getByRole('button', { name: 'Open plan' }).click()
+  const itinerary = page.locator('.itinerary')
+  await expect(itinerary).toHaveAttribute('data-plan-id', primaryPlanId!)
+  await expect(itinerary).toHaveAttribute('data-venue-id', aiVenueId!)
   await expectNoHorizontalOverflow(page)
 })
 

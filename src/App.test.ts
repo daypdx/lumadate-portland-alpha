@@ -178,6 +178,11 @@ describe('Portland alpha planning safeguards', () => {
     expect(candidates[0]).not.toHaveProperty('title')
     expect(candidates[0]).not.toHaveProperty('reasons')
     expect(candidates[0]).not.toHaveProperty('warnings')
+
+    expect(candidates.find((candidate) => candidate.planId === 'portland-park-restaurant-walk')?.reasonCodes)
+      .toEqual(expect.arrayContaining(['QUIET_FIT', 'INTEREST_MATCH', 'BACKUP_AVAILABLE']))
+    expect(candidates.find((candidate) => candidate.planId === 'coffee-art-low-pressure')?.reasonCodes)
+      .toContain('WEATHER_SAFE')
   })
 
   it('names the defining comedy venue as the plan anchor', () => {

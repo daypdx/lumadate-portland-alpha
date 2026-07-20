@@ -15,7 +15,9 @@ import {
   getAiFeatureMode,
   mockItineraryComposer,
   reasonCodesToCopy,
+  type AiItineraryCandidate,
   type AiItineraryComposition,
+  type AiReasonCode,
 } from './ai/itineraryComposer'
 import './App.css'
 
@@ -926,6 +928,62 @@ export function rankPlans(intake: Intake): RankedPlan[] {
     .slice(0, 3)
 }
 
+export function aiCandidateInputsFor(intake: Intake, rankedPlans: RankedPlan[]): AiItineraryCandidate[] {
+  return rankedPlans.map((ranked) => {
+    const { plan } = ranked
+    const firstDateSafetyRequired = intake.firstDateSafeMode || intake.dateStage === 'first_date'
+    const alcoholCompatible = intake.alcoholPreference === 'alcohol_ok' || !plan.safetyProfile.alcoholCentric
+    const safetyEligible = plan.safetyProfile.publicPlace
+      && (!firstDateSafetyRequired || plan.safetyProfile.goodForFirstDate)
+      && alcoholCompatible
+    const preferredKinds = preferredVenueKinds(plan)
+    const planArea = plan.neighborhoods[0] ?? intake.dateArea
+    const venueOptions = curatedVenuesForPlan(intake, plan, recommendablePortlandVenues.length)
+      .filter(({ venue }) => (
+        areaLabelsMatch(planArea, venue.area)
+        && preferredKinds.includes(venue.kind)
+        && venue.status === 'active'
+      ))
+      .map(({ venue }) => ({
+        venueId: venue.id,
+        areaMatch: true,
+        categoryMatch: true,
+        available: true,
+      }))
+    const planTerms = new Set([...plan.tags, ...plan.interestKeywords].map((term) => term.toLowerCase()))
+    const structuredInterests = [...intake.activityTypes, ...intake.moodTypes]
+      .map((term) => term.toLowerCase())
+    const quietRequested = structuredInterests.some((term) => (
+      ['quiet', 'quiet_conversation', 'low_crowd', 'cozy_cafe', 'easy_exit'].includes(term)
+    ))
+    const quietFit = quietRequested && [...planTerms].some((term) => /quiet|low pressure|coffee|cafe|bookstore|park|walk/.test(term))
+    const interestMatch = structuredInterests.some((term) => planTerms.has(term))
+    const weatherSafe = intake.indoorOutdoor === 'weather_safe' && plan.safetyProfile.indoor
+    const reasonCodes: AiReasonCode[] = [
+      ...(ranked.areaMatch ? ['AREA_MATCH' as const] : []),
+      ...(ranked.budgetFits ? ['BUDGET_MATCH' as const] : []),
+      ...(quietFit ? ['QUIET_FIT' as const] : []),
+      ...(interestMatch ? ['INTEREST_MATCH' as const] : []),
+      ...(plan.safetyProfile.publicPlace && plan.safetyProfile.goodForFirstDate && alcoholCompatible
+        ? ['FIRST_DATE_SAFE' as const]
+        : []),
+      ...(weatherSafe ? ['WEATHER_SAFE' as const] : []),
+      ...(plan.backupOptions.length > 0 ? ['BACKUP_AVAILABLE' as const] : []),
+    ]
+
+    return {
+      planId: plan.id,
+      estimatedCostHigh: ranked.estimatedCostHigh,
+      durationMinutes: plan.estimatedDurationMinutes,
+      areaMatch: ranked.areaMatch,
+      budgetFits: ranked.budgetFits,
+      safetyEligible,
+      venueOptions,
+      reasonCodes,
+    }
+  })
+}
+
 function App() {
   const aiFeatureMode = getAiFeatureMode(window.location.search)
   const [started, setStarted] = useState(false)
@@ -1082,16 +1140,7 @@ function App() {
 
     const request = createAiItineraryRequest({
       intake,
-      candidates: rankedPlans.map((ranked) => ({
-        planId: ranked.plan.id,
-        title: ranked.plan.title,
-        score: ranked.score,
-        estimatedCostHigh: ranked.estimatedCostHigh,
-        durationMinutes: ranked.plan.estimatedDurationMinutes,
-        venueIds: (venueSuggestionsByPlan[ranked.plan.id] ?? []).map(({ venue }) => venue.id),
-        reasons: ranked.reasons,
-        warnings: ranked.warnings,
-      })),
+      candidates: aiCandidateInputsFor(intake, rankedPlans),
     })
     const composition = await composeAiItinerarySafely(request, mockItineraryComposer)
     const composedVenueSelections = Object.fromEntries(
@@ -2349,7 +2398,12 @@ function ResultsPanel({
         <p>Open one, save it for later, or adjust it without changing the other options.</p>
       </div>
       {aiComposition && (
-        <div className="itinerary-verification-note ai-composition-note" role="status" aria-label="AI composition summary">
+        <div
+          className="itinerary-verification-note ai-composition-note"
+          role="status"
+          aria-label="AI composition summary"
+          data-primary-plan-id={aiComposition.primaryPlanId}
+        >
           <span className="eyebrow">AI foundation preview</span>
           <strong>AI foundation preview — safe mock, no hosted model connected</strong>
           <p>LumaDate controls every plan, venue, and visible explanation shown below.</p>
@@ -2371,6 +2425,9 @@ function ResultsPanel({
             <article
               key={ranked.plan.id}
               className={activeId === ranked.plan.id ? 'result-card selected' : 'result-card'}
+              data-plan-id={ranked.plan.id}
+              data-venue-id={venue?.venue.id ?? ''}
+              data-ai-venue-id={composedPlan?.venueId ?? ''}
             >
               <div className="result-card-heading">
                 <span className="score">#{index + 1} {fitLabel(ranked, index)}</span>
@@ -2566,7 +2623,12 @@ function ItineraryPanel({
   const inviteText = inviteTextFor(ranked, intake, inviteDraft, selectedVenue)
 
   return (
-    <section className="surface itinerary" tabIndex={-1}>
+    <section
+      className="surface itinerary"
+      tabIndex={-1}
+      data-plan-id={canonical.planId}
+      data-venue-id={selectedVenue?.venue.id ?? ''}
+    >
       <PlanSummaryCard
         ranked={ranked}
         intake={intake}
