@@ -1,3 +1,9 @@
+export type AiFeatureMode = 'deterministic' | 'mock-preview'
+
+export function getAiFeatureMode(search: string): AiFeatureMode {
+  return new URLSearchParams(search).get('aiPreview') === 'mock' ? 'mock-preview' : 'deterministic'
+}
+
 export type AiReasonCode =
   | 'AREA_MATCH'
   | 'BUDGET_MATCH'

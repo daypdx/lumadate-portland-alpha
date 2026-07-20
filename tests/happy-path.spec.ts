@@ -1,7 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 
-async function acknowledgeAndEnter(page: Page, buttonName: 'Build my date plan' | 'See a Portland example') {
-  await page.goto('/')
+async function acknowledgeAndEnter(
+  page: Page,
+  buttonName: 'Build my date plan' | 'See a Portland example',
+  path = '/',
+) {
+  await page.goto(path)
   await page.getByRole('button', { name: buttonName }).click()
   const dialog = page.getByRole('dialog', { name: 'Before you continue' })
   await expect(dialog).toBeVisible()
@@ -189,7 +193,7 @@ test('the selected plan keeps one venue schedule across itinerary, invite, safet
   await expectNoHorizontalOverflow(page)
 })
 
-test('guided generation discloses the provider-neutral mock AI composition', async ({ page }) => {
+test('guided generation remains deterministic unless the internal mock preview is enabled', async ({ page }) => {
   await acknowledgeAndEnter(page, 'Build my date plan')
 
   for (let step = 0; step < 6; step += 1) {
@@ -198,9 +202,22 @@ test('guided generation discloses the provider-neutral mock AI composition', asy
   await page.getByRole('button', { name: 'Generate options' }).click()
 
   await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
-  await expect(page.getByText('AI foundation preview')).toBeVisible()
-  await expect(page.getByText('Safe mock — no hosted model or API key is connected.')).toBeVisible()
-  await expect(page.getByLabel('AI composition summary')).toContainText('approved candidates')
+  await expect(page.getByLabel('AI composition summary')).toHaveCount(0)
+})
+
+test('internal mock preview discloses the provider-neutral AI composition', async ({ page }) => {
+  await acknowledgeAndEnter(page, 'Build my date plan', '/?aiPreview=mock')
+
+  for (let step = 0; step < 6; step += 1) {
+    await page.getByRole('button', { name: 'Next' }).click()
+  }
+  await page.getByRole('button', { name: 'Generate options' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
+  const aiSummary = page.getByLabel('AI composition summary')
+  await expect(aiSummary.getByText('AI foundation preview', { exact: true })).toBeVisible()
+  await expect(aiSummary).toContainText('safe mock, no hosted model connected')
+  await expect(aiSummary).toContainText('controls every plan, venue, and visible explanation')
   await expectNoHorizontalOverflow(page)
 })
 

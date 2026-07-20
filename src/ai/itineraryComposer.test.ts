@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   composeAiItinerarySafely,
   createAiItineraryRequest,
+  getAiFeatureMode,
   mockItineraryComposer,
   reasonCodesToCopy,
   validateAiItineraryComposition,
@@ -99,6 +100,12 @@ function createValidComposition() {
 }
 
 describe('AI itinerary request boundary', () => {
+  it('defaults to deterministic mode and enables mock composition only for the internal preview query', () => {
+    expect(getAiFeatureMode('')).toBe('deterministic')
+    expect(getAiFeatureMode('?aiPreview=hosted')).toBe('deterministic')
+    expect(getAiFeatureMode('?aiPreview=mock')).toBe('mock-preview')
+  })
+
   it('excludes the private starting location from the model request', () => {
     const request = createAiItineraryRequest({
       intake: {

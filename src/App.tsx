@@ -12,6 +12,7 @@ import { mockWeatherAtArrival } from './lib/mockItinerarySignals'
 import {
   composeAiItinerarySafely,
   createAiItineraryRequest,
+  getAiFeatureMode,
   mockItineraryComposer,
   reasonCodesToCopy,
   type AiItineraryComposition,
@@ -926,6 +927,7 @@ export function rankPlans(intake: Intake): RankedPlan[] {
 }
 
 function App() {
+  const aiFeatureMode = getAiFeatureMode(window.location.search)
   const [started, setStarted] = useState(false)
   const [experienceMode, setExperienceMode] = useState<'personal' | 'demo'>('personal')
   const [entryIntent, setEntryIntent] = useState<EntryIntent | null>(null)
@@ -1070,6 +1072,14 @@ function App() {
   }
 
   async function showItinerary() {
+    if (aiFeatureMode === 'deterministic') {
+      setAiComposition(null)
+      setTab('options')
+      showToast('Plans generated - pick one to inspect.')
+      window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
+      return
+    }
+
     const request = createAiItineraryRequest({
       intake,
       candidates: rankedPlans.map((ranked) => ({

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import plansJson from './data/datePlans.json'
 import {
   canonicalPlanFor,
+  aiCandidateInputsFor,
   calmExitMessages,
   createDefaultIntake,
   createExampleIntake,
@@ -145,6 +146,38 @@ describe('Portland alpha planning safeguards', () => {
     expect(ranked[0].plan.neighborhoods).toContain('SE Portland')
     expect(ranked[0].estimatedCostHigh).toBeLessThanOrEqual(120)
     expect(ranked.find((item) => item.plan.id === 'jazz-sushi-bookstore-evening')?.warnings.join(' ')).toContain('over budget')
+  })
+
+  it('builds AI candidates from hard plan eligibility and compatible active venues only', () => {
+    const intake = {
+      ...createExampleIntake(new Date(2026, 6, 17, 12, 0)),
+      dateArea: 'SE Portland',
+      budgetMax: 120,
+      firstDateSafeMode: true,
+      dietaryLimits: 'peanut allergy — private note',
+    }
+    const ranked = rankPlans(intake)
+    const candidates = aiCandidateInputsFor(intake, ranked)
+
+    expect(candidates).toHaveLength(ranked.length)
+    candidates.forEach((candidate, index) => {
+      expect(candidate.areaMatch).toBe(ranked[index].areaMatch)
+      expect(candidate.budgetFits).toBe(ranked[index].budgetFits)
+      expect(candidate.safetyEligible).toBe(
+        ranked[index].plan.safetyProfile.publicPlace
+        && ranked[index].plan.safetyProfile.goodForFirstDate
+        && !ranked[index].plan.safetyProfile.alcoholCentric,
+      )
+      expect(candidate.venueOptions?.every((venue) => venue.areaMatch && venue.categoryMatch && venue.available)).toBe(true)
+      expect(candidate.reasonCodes).toEqual(expect.arrayContaining([
+        ...(ranked[index].areaMatch ? ['AREA_MATCH'] : []),
+        ...(ranked[index].budgetFits ? ['BUDGET_MATCH'] : []),
+      ]))
+    })
+    expect(JSON.stringify(candidates)).not.toContain(intake.dietaryLimits)
+    expect(candidates[0]).not.toHaveProperty('title')
+    expect(candidates[0]).not.toHaveProperty('reasons')
+    expect(candidates[0]).not.toHaveProperty('warnings')
   })
 
   it('names the defining comedy venue as the plan anchor', () => {
