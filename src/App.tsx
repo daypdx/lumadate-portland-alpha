@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import plansJson from './data/datePlans.json'
 import { recommendablePortlandVenues, type CuratedVenue, type CuratedVenueKind } from './data/portlandVenues'
 import lumaDateEmblem from './assets/lumadate-emblem.png'
@@ -19,6 +19,13 @@ import {
   type AiItineraryComposition,
   type AiReasonCode,
 } from './ai/itineraryComposer'
+import {
+  conciergeSuggestions,
+  interpretConciergeMessage,
+  selectConciergeCandidate,
+  type ConciergePlanCandidate,
+  type ConciergeRequest,
+} from './concierge/planConcierge'
 import './App.css'
 
 type MeetingMode = 'near_me' | 'near_them' | 'fair_midpoint' | 'neutral_public'
@@ -1200,6 +1207,42 @@ export async function runCurrentAiGeneration<T>(
   }
 }
 
+export function conciergePlanCandidatesFor(
+  intake: Intake,
+  rankedPlans: RankedPlan[],
+): ConciergePlanCandidate[] {
+  const eligibleByPlan = new Map(
+    aiCandidateInputsFor(intake, rankedPlans).map((candidate) => [candidate.planId, candidate]),
+  )
+
+  return rankedPlans.map((ranked) => {
+    const { plan } = ranked
+    const eligibility = eligibleByPlan.get(plan.id)
+    const searchable = [
+      ...plan.tags,
+      ...plan.interestKeywords,
+      ...(plan.places ?? []).flatMap((place) => [place.category, place.why]),
+    ].join(' ').toLowerCase()
+
+    return {
+      planId: plan.id,
+      title: plan.title,
+      estimatedCostHigh: ranked.estimatedCostHigh,
+      durationMinutes: plan.estimatedDurationMinutes,
+      eligible: Boolean(
+        eligibility?.areaMatch
+        && eligibility.budgetFits
+        && eligibility.safetyEligible
+        && eligibility.venueOptions.length > 0
+      ),
+      isQuiet: /quiet|conversation|low pressure|bookstore|coffee|cafe/.test(searchable),
+      isIndoor: plan.safetyProfile.indoor,
+      isRomantic: /romantic|special|jazz|garden|scenic|thoughtful/.test(searchable),
+      hasFood: /food|dinner|restaurant|sushi|coffee|cafe|dessert|mocktail|drink/.test(searchable),
+    }
+  })
+}
+
 function App() {
   const aiFeatureMode = getAiFeatureMode(window.location.search)
   const [started, setStarted] = useState(false)
@@ -1242,6 +1285,19 @@ function App() {
   const venueSuggestions = venueSuggestionsByPlan[active.plan.id] ?? []
   const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
     ?? automaticVenueForPlan(active.plan, venueSuggestions, curatedVenueAreaForPlan(intake, active.plan))
+  const adjustVenueByPlan = useMemo(() => Object.fromEntries(
+    allRankedPlans.map((ranked) => {
+      const matches = venueSuggestionsByPlan[ranked.plan.id] ?? []
+      const selected = matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id])
+        ?? automaticVenueForPlan(ranked.plan, matches, curatedVenueAreaForPlan(intake, ranked.plan))
+      return [ranked.plan.id, selected]
+    }),
+  ) as Record<string, CuratedVenueMatch | undefined>, [
+    allRankedPlans,
+    intake,
+    selectedVenueByPlan,
+    venueSuggestionsByPlan,
+  ])
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -1662,7 +1718,9 @@ function App() {
           {tab === 'adjust' && (
             <AdjustPanel
               ranked={active}
-              rankedPlans={rankedPlans}
+              rankedPlans={allRankedPlans}
+              intake={intake}
+              venuesByPlan={adjustVenueByPlan}
               message={adjustmentMessage}
               onAdjust={setAdjustmentMessage}
               onSelect={setActiveId}
@@ -3034,9 +3092,22 @@ function PlanSummaryCard({
   )
 }
 
+type ConciergeChatMessage = {
+  id: number
+  role: 'assistant' | 'user'
+  text: string
+}
+
+type ConciergeProposal = {
+  request: ConciergeRequest
+  targetPlanId: string
+}
+
 function AdjustPanel({
   ranked,
   rankedPlans,
+  intake,
+  venuesByPlan,
   message,
   onAdjust,
   onSelect,
@@ -3048,6 +3119,8 @@ function AdjustPanel({
 }: {
   ranked: RankedPlan
   rankedPlans: RankedPlan[]
+  intake: Intake
+  venuesByPlan: Record<string, CuratedVenueMatch | undefined>
   message: string
   onAdjust: (message: string) => void
   onSelect: (planId: string) => void
@@ -3057,44 +3130,179 @@ function AdjustPanel({
   onOpenLate: () => void
   onOpenExit: () => void
 }) {
-  const adjustments: Array<[string, string, string]> = [
-    ['Make cheaper', 'Find a lower-cost plan while keeping real place links.', 'Selected the lowest-cost itinerary and kept Google Maps review links visible.'],
-    ['Make quieter', 'Prioritize conversation-friendly venues and calmer backups.', `Favored quiet backups like ${ranked.plan.backupOptions[0] ?? 'a quieter backup nearby'}.`],
-    ['Make more romantic', 'Tune the plan toward thoughtful without making it too formal.', 'Kept a more intentional finish without making it too formal.'],
-    ['Switch indoor', 'Find a rain-safe or indoor version of the plan.', 'Selected an indoor/rain-safe itinerary where available.'],
-    ['Replace activity', 'Swap the main activity for a nearby backup.', `Swapped the anchor toward ${ranked.plan.backupOptions[1] ?? 'a nearby backup'}.`],
-    ['Add food/drinks', 'Prioritize plans with food, coffee, dessert, or drinks.', 'Prioritized a plan with real food/drink locations and Google Maps links.'],
-    ['Extend date', 'Keep optional next stops ready if the night is going well.', 'Kept optional extension stops visible on the itinerary.'],
-    ['End sooner', 'Shorten the plan while keeping the public meet point.', 'Selected a shorter itinerary and kept the public meet point.'],
-    ['Continue the night', 'Show low-pressure late-night food, dessert, coffee, or safe transport.', 'Showing low-pressure late-night food, dessert, coffee, or safe transport.'],
-    ['Find backup nearby', 'Bring the backup forward if the first choice is crowded.', ranked.crowdBackup],
-  ]
+  const nextMessageId = useRef(2)
+  const [input, setInput] = useState('')
+  const [proposal, setProposal] = useState<ConciergeProposal | null>(null)
+  const [messages, setMessages] = useState<ConciergeChatMessage[]>([
+    {
+      id: 1,
+      role: 'assistant',
+      text: 'Tell me what should change. I can work with budget, noise, indoor plans, timing, romance, or food.',
+    },
+  ])
+  const candidates = useMemo(
+    () => conciergePlanCandidatesFor(intake, rankedPlans),
+    [intake, rankedPlans],
+  )
+  const targetRanked = proposal
+    ? rankedPlans.find((candidate) => candidate.plan.id === proposal.targetPlanId)
+    : undefined
+  const currentCanonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const targetVenue = targetRanked ? venuesByPlan[targetRanked.plan.id] : undefined
+  const targetCanonical = targetRanked
+    ? canonicalPlanFor(targetRanked, intake, targetVenue)
+    : undefined
 
-  function adjustedPlanId(title: string): string {
-    if (title === 'Make cheaper' || title === 'End sooner') {
-      return [...rankedPlans].sort((a, b) => a.plan.estimatedCostTotal - b.plan.estimatedCostTotal)[0]?.plan.id ?? ranked.plan.id
-    }
-    if (title === 'Switch indoor' || title === 'Make quieter') {
-      return rankedPlans.find((item) => item.plan.safetyProfile.indoor && item.plan.tags.includes('quiet'))?.plan.id ?? ranked.plan.id
-    }
-    if (title === 'Add food/drinks') {
-      return rankedPlans.find((item) => item.plan.places?.some((place) => /food|sushi|coffee|dessert|drink/i.test(place.category)))?.plan.id ?? ranked.plan.id
-    }
-    return ranked.plan.id
+  function appendMessage(role: ConciergeChatMessage['role'], text: string) {
+    const id = nextMessageId.current
+    nextMessageId.current += 1
+    setMessages((current) => [...current, { id, role, text }])
   }
 
-  function applyAdjustment(title: string, appliedCopy: string) {
-    const planId = adjustedPlanId(title)
-    onSelect(planId)
-    onAdjust(`Preview ready - ${title}: ${appliedCopy} Keep adjusted plan to use it, or choose another adjustment.`)
+  function handleRequest(value: string) {
+    const interpretation = interpretConciergeMessage(value)
+    setProposal(null)
+
+    if (interpretation.status === 'empty') {
+      appendMessage('assistant', interpretation.reply)
+      return
+    }
+    if (interpretation.status === 'privacy') {
+      appendMessage('user', 'Private details withheld.')
+      appendMessage('assistant', interpretation.reply)
+      return
+    }
+
+    appendMessage('user', value.trim())
+    if (interpretation.status !== 'proposal') {
+      appendMessage('assistant', interpretation.reply)
+      return
+    }
+
+    const candidate = selectConciergeCandidate(interpretation.request, candidates)
+    if (!candidate) {
+      appendMessage(
+        'assistant',
+        'I could not find an approved plan that makes that change without breaking your area, budget, or safety settings.',
+      )
+      return
+    }
+    if (candidate.planId === ranked.plan.id) {
+      appendMessage('assistant', 'Your current plan already fits that request, so I left it unchanged.')
+      return
+    }
+
+    setProposal({ request: interpretation.request, targetPlanId: candidate.planId })
+    appendMessage('assistant', 'I found an approved option. Review it below. Nothing changes until you approve.')
+  }
+
+  function submitMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    handleRequest(input)
+    setInput('')
+  }
+
+  function applyProposal() {
+    if (!proposal || !targetRanked) return
+    onSelect(targetRanked.plan.id)
+    onAdjust(`Concierge applied: ${proposal.request.label}. ${targetRanked.plan.title} is now the active plan.`)
+    appendMessage('assistant', `Applied: ${proposal.request.label}. Your itinerary now uses ${targetRanked.plan.title}.`)
+    setProposal(null)
+  }
+
+  function cancelProposal() {
+    setProposal(null)
+    appendMessage('assistant', 'No change made. Your current itinerary is still active.')
   }
 
   return (
-    <section className="surface">
+    <section className="surface" data-active-plan-id={ranked.plan.id}>
       <div className="section-heading">
-        <span className="eyebrow">Preview changes</span>
-        <h2>Preview an adjusted plan, then keep it or choose another change.</h2>
+        <span className="eyebrow">LumaDate Concierge</span>
+        <h2>Adjust the plan by asking for one clear change.</h2>
+        <p>Local mock. No hosted AI or messages.</p>
       </div>
+
+      <section className="concierge" aria-label="LumaDate Concierge">
+        <div className="concierge-log" role="log" aria-live="polite" aria-relevant="additions">
+          {messages.map((chatMessage) => (
+            <p className={`concierge-message ${chatMessage.role}`} key={chatMessage.id}>
+              <span>{chatMessage.role === 'assistant' ? 'LumaDate' : 'You'}</span>
+              {chatMessage.text}
+            </p>
+          ))}
+        </div>
+
+        <div className="concierge-suggestions" aria-label="Suggested adjustments">
+          {conciergeSuggestions.map((suggestion) => (
+            <button
+              type="button"
+              className="concierge-suggestion"
+              key={suggestion}
+              onClick={() => handleRequest(suggestion)}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+
+        <form className="concierge-form" onSubmit={submitMessage}>
+          <label htmlFor="concierge-request">What should change?</label>
+          <div>
+            <input
+              id="concierge-request"
+              className="concierge-input"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              maxLength={240}
+              placeholder="Try: make it quieter"
+              autoComplete="off"
+            />
+            <button type="submit" className="primary">Send</button>
+          </div>
+          <small>Do not enter addresses, phone numbers, email addresses, or links.</small>
+        </form>
+
+        {proposal && targetRanked && targetCanonical && (
+          <section className="concierge-proposal" aria-label="Proposed itinerary change">
+            <div className="concierge-proposal-heading">
+              <span className="eyebrow">Approval required</span>
+              <h3>{proposal.request.label}</h3>
+              <p>Compare the active plan with the proposed replacement.</p>
+            </div>
+            <div className="concierge-comparison">
+              <div className="concierge-plan before">
+                <span>Current</span>
+                <strong>{ranked.plan.title}</strong>
+                <small>{currentCanonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, currentCanonical.meetArea)}</small>
+                <small>{formatDuration(ranked.plan.estimatedDurationMinutes)} | {formatCostRange(ranked.plan.estimatedCostTotal)}</small>
+              </div>
+              <span className="concierge-arrow" aria-hidden="true">to</span>
+              <div
+                className="concierge-plan after"
+                data-plan-id={targetRanked.plan.id}
+                data-venue-id={targetVenue?.venue.id}
+              >
+                <span>Proposed</span>
+                <strong>{targetRanked.plan.title}</strong>
+                <small>{targetCanonical.anchorPlace?.name ?? primaryAnchor(targetRanked.plan, targetCanonical.meetArea)}</small>
+                <small>{formatDuration(targetRanked.plan.estimatedDurationMinutes)} | {formatCostRange(targetRanked.plan.estimatedCostTotal)}</small>
+              </div>
+            </div>
+            <div className="concierge-actions">
+              <button type="button" className="primary" onClick={applyProposal}>Apply change</button>
+              <button type="button" className="secondary" onClick={cancelProposal}>Keep current plan</button>
+            </div>
+          </section>
+        )}
+      </section>
+
+      {message && <p className="mock-update" role="status">{message}</p>}
+      {message && (
+        <button type="button" className="primary wide" onClick={onGoItinerary}>
+          Open adjusted itinerary
+        </button>
+      )}
       <section className="adjust-venue-entry" aria-label="Selected venue">
         <div>
           <span className="eyebrow">Venue</span>
@@ -3103,29 +3311,6 @@ function AdjustPanel({
         </div>
         <button type="button" className="secondary" onClick={onReviewVenue}>Review or change venue</button>
       </section>
-      <div className="adjust-grid">
-        {adjustments.map(([title, preview, appliedCopy]) => {
-          const selected = message.startsWith(`Preview ready - ${title}:`)
-          return (
-          <button
-            type="button"
-            className={selected ? 'adjust-card selected' : 'adjust-card'}
-            aria-pressed={selected}
-            key={title}
-            onClick={() => applyAdjustment(title, appliedCopy)}
-          >
-            <strong>{selected ? `Applied: ${title}` : title}</strong>
-            <span>{selected ? appliedCopy : preview}</span>
-          </button>
-          )
-        })}
-      </div>
-      {message && <p className="mock-update" role="status">{message}</p>}
-      {message && (
-        <button type="button" className="primary wide" onClick={onGoItinerary}>
-          Keep adjusted plan
-        </button>
-      )}
       <button type="button" className="secondary wide" onClick={onOpenLate}>
         Open running-late assistant
       </button>

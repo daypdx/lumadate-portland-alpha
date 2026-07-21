@@ -434,10 +434,10 @@ test('internal mock preview discloses deterministic fallback when no AI candidat
   }
   await page.getByRole('button', { name: 'Generate options' }).click()
 
-  const aiSummary = page.getByLabel('AI composition summary')
-  await expect(aiSummary.getByText('AI preview unavailable — no AI selection applied', { exact: true })).toBeVisible()
   await expect(page.locator('.toast-region')).toContainText('AI preview unavailable - deterministic plans kept.')
   await expect(page.locator('.toast-region')).not.toContainText('Safe mock composition generated')
+  const aiSummary = page.getByLabel('AI composition summary')
+  await expect(aiSummary.getByText('AI preview unavailable — no AI selection applied', { exact: true })).toBeVisible()
 })
 
 test('changing eligibility after mock composition clears stale AI selections', async ({ page }) => {
@@ -491,5 +491,47 @@ test('Help me leave separates calm exits, trusted-contact urgency, and emergency
   await dialog.getByRole('radio', { name: 'I need help leaving' }).click()
   await expect(messagePreview).toHaveValue(/public meet point/)
   await expect(dialog.getByLabel('Emergency help')).toContainText('Immediate danger is different.')
+  await expectNoHorizontalOverflow(page)
+})
+
+test('Concierge withholds private details and requires approval before changing the canonical plan', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await generatePearlJazzPlan(page, '/')
+
+  const originalPlanId = 'coffee-art-low-pressure'
+  const originalCard = page.locator(`article.result-card[data-plan-id="${originalPlanId}"]`)
+  await originalCard.getByRole('button', { name: 'Open plan' }).click()
+  await page.getByRole('button', { name: 'Adjust plan' }).click()
+
+  const adjustSurface = page.locator('.surface[data-active-plan-id]')
+  await expect(adjustSurface).toHaveAttribute('data-active-plan-id', originalPlanId)
+  await expect(page.getByText('Local mock. No hosted AI or messages.')).toBeVisible()
+
+  const request = page.getByLabel('What should change?')
+  await request.fill('Meet me at 123 Private Street')
+  await page.getByRole('button', { name: 'Send' }).click()
+  const transcript = page.getByRole('log')
+  await expect(transcript).toContainText('Private details withheld.')
+  await expect(transcript).not.toContainText('123 Private Street')
+
+  await request.fill('Make it more romantic')
+  await page.getByRole('button', { name: 'Send' }).click()
+  const proposal = page.getByLabel('Proposed itinerary change')
+  await expect(proposal).toBeVisible()
+  const proposedPlan = proposal.locator('.concierge-plan.after')
+  const proposedPlanId = await proposedPlan.getAttribute('data-plan-id')
+  const proposedVenueId = await proposedPlan.getAttribute('data-venue-id')
+  expect(proposedPlanId).toBeTruthy()
+  expect(proposedPlanId).not.toBe(originalPlanId)
+  expect(proposedVenueId).toBeTruthy()
+
+  await expect(adjustSurface).toHaveAttribute('data-active-plan-id', originalPlanId)
+  await proposal.getByRole('button', { name: 'Apply change' }).click()
+  await expect(adjustSurface).toHaveAttribute('data-active-plan-id', proposedPlanId!)
+  await expect(page.locator('.mock-update')).toContainText('Concierge applied')
+
+  await page.getByRole('button', { name: 'Open adjusted itinerary' }).click()
+  await expect(page.locator('.itinerary')).toHaveAttribute('data-plan-id', proposedPlanId!)
+  await expect(page.locator('.itinerary')).toHaveAttribute('data-venue-id', proposedVenueId!)
   await expectNoHorizontalOverflow(page)
 })

@@ -9,6 +9,7 @@ import {
   aiCompositionToast,
   aiCompositionApplicationDecision,
   calmExitMessages,
+  conciergePlanCandidatesFor,
   createAiGenerationCoordinator,
   createDefaultIntake,
   createExampleIntake,
@@ -60,6 +61,29 @@ describe('Portland alpha planning safeguards', () => {
       },
     }
   }
+
+  it('keeps Concierge proposals behind the approved same-area venue gate', () => {
+    const { intake } = pearlJazzScenario()
+    const ranked = rankPlans(intake)
+    const coffeeEligibility = aiCandidateInputsFor(intake, ranked)
+      .find(({ planId }) => planId === 'coffee-art-low-pressure')
+    const candidates = conciergePlanCandidatesFor(intake, ranked)
+
+    expect(coffeeEligibility).toMatchObject({
+      areaMatch: true,
+      budgetFits: true,
+      safetyEligible: true,
+      venueOptions: [],
+    })
+    expect(candidates.find(({ planId }) => planId === 'coffee-art-low-pressure')).toMatchObject({
+      eligible: false,
+      estimatedCostHigh: 60,
+    })
+    expect(candidates.find(({ planId }) => planId === 'jazz-sushi-bookstore-evening')).toMatchObject({
+      eligible: true,
+      isRomantic: true,
+    })
+  })
 
   it('creates a current date window instead of a hardcoded launch date', () => {
     const now = new Date(2026, 6, 17, 15, 0)
