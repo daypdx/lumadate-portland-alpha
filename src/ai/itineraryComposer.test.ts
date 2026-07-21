@@ -350,7 +350,7 @@ describe('AI itinerary request boundary', () => {
     expect(JSON.stringify(request)).not.toContain('Private dietary note')
   })
 
-  it('composes only from approved plan and venue candidates', async () => {
+  it('uses the local mock to demonstrate selecting a lower-ranked fully eligible candidate', async () => {
     const request = createAiItineraryRequest({
       intake: {
         startLocation: '123 Private Street',
@@ -413,9 +413,10 @@ describe('AI itinerary request boundary', () => {
     const result = await mockItineraryComposer.compose(request)
 
     expect(result).not.toHaveProperty('providerMode')
-    expect(result.primaryPlanId).toBe('best-plan')
+    expect(result.primaryPlanId).toBe('backup-plan')
     expect(result.plans.map((plan) => plan.planId)).toEqual(['best-plan', 'backup-plan'])
     expect(result.plans[0].venueId).toBe('best-venue')
+    expect(result.plans[1].venueId).toBe('other-venue')
     expect(result.plans[0].reasonCodes).toEqual(expect.arrayContaining(['AREA_MATCH', 'BUDGET_MATCH']))
     expect(result.plans[0]).not.toHaveProperty('explanation')
     expect(result).not.toHaveProperty('summary')
@@ -536,7 +537,7 @@ describe('AI itinerary request boundary', () => {
     expect(validateAiItineraryComposition(request, duplicateVenues).errors.join(' ')).toContain('Duplicate venue ID')
   })
 
-  it('does not let a provider replace the authoritative first eligible plan', () => {
+  it('accepts a lower-ranked primary plan when it passes every hard eligibility rule', () => {
     const request = createTestRequest()
     const lowerRankedPrimary = {
       ...createValidComposition(),
@@ -553,8 +554,7 @@ describe('AI itinerary request boundary', () => {
 
     const validation = validateAiItineraryComposition(request, lowerRankedPrimary)
 
-    expect(validation.valid).toBe(false)
-    expect(validation.errors.join(' ')).toContain('authoritative first eligible plan')
+    expect(validation).toEqual({ valid: true, errors: [] })
   })
 
   it('rejects structurally oversized output before traversing provider array elements', () => {

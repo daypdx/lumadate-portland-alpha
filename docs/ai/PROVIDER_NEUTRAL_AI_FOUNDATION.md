@@ -96,7 +96,7 @@ A composer may select a plan only when all supplied LumaDate facts are true:
 - when first-date safety is enabled or `dateStage === 'first_date'`, the plan is marked good for a first date; and
 - the plan is compatible with the alcohol preference. Alcohol-centric or bar-tagged plans are ineligible unless the preference is `alcohol_ok`.
 
-The validator rejects unknown, duplicate, over-budget, different-area, and safety-ineligible plans. The primary plan must be present in the returned plan list and must remain LumaDate's first deterministically ranked eligible candidate; a provider cannot replace that authority. A response may select one to three plans.
+The validator rejects unknown, duplicate, over-budget, different-area, and safety-ineligible plans. The primary plan must be present in the returned plan list and pass every hard eligibility rule. Within that LumaDate-approved eligible set, a composer may rerank candidates and select a lower-ranked plan as primary. A response may select one to three plans.
 
 ### Venues
 

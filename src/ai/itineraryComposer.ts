@@ -439,12 +439,6 @@ function validateCompositionSnapshot(
   if (typeof composition.primaryPlanId === 'string' && !selectedPlanIds.has(composition.primaryPlanId)) {
     errors.push('Primary plan must appear in the returned plan list.')
   }
-  const authoritativePrimary = request.candidates.find((candidate) => (
-    candidate.areaMatch && candidate.budgetFits && candidate.safetyEligible
-  ))
-  if (authoritativePrimary && composition.primaryPlanId !== authoritativePrimary.planId) {
-    errors.push('Primary plan must preserve LumaDate\'s authoritative first eligible plan.')
-  }
 
   return { valid: errors.length === 0, errors }
 }
@@ -576,7 +570,7 @@ export const mockItineraryComposer = {
 
     return {
       schemaVersion: 1,
-      primaryPlanId: plans[0]?.planId ?? '',
+      primaryPlanId: plans[1]?.planId ?? plans[0]?.planId ?? '',
       plans,
       verificationRequired: true,
     }

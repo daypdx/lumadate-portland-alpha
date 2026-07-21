@@ -327,13 +327,21 @@ test('guided generation remains deterministic unless the internal mock preview i
   await expect(page.getByText('AI foundation preview — safe mock, no hosted model connected', { exact: true })).toHaveCount(0)
 })
 
-test('internal mock preview discloses the provider-neutral AI composition', async ({ page }) => {
+test('internal mock may select a lower-ranked eligible plan while every downstream identity stays canonical', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await acknowledgeAndEnter(page, 'Build my date plan', '/?aiPreview=mock')
 
-  for (let step = 0; step < 6; step += 1) {
-    await page.getByRole('button', { name: 'Next' }).click()
-  }
+  await page.getByLabel('Planning area').selectOption('NW Portland')
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('radio', { name: 'Established couple' }).click()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Custom max' }).click()
+  await page.getByLabel(/Plan around: up to/).fill('250')
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: /First-date safe mode/ }).click()
+  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Generate options' }).click()
 
   await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
@@ -341,18 +349,75 @@ test('internal mock preview discloses the provider-neutral AI composition', asyn
   await expect(aiSummary.getByText('AI foundation preview — safe mock, no hosted model connected', { exact: true })).toBeVisible()
   await expect(aiSummary).toContainText('controls every plan, venue, and visible explanation')
 
+  const cards = page.locator('article.result-card')
+  const deterministicFirstPlanId = await cards.first().getAttribute('data-plan-id')
   const primaryPlanId = await aiSummary.getAttribute('data-primary-plan-id')
   expect(primaryPlanId).toBeTruthy()
+  expect(primaryPlanId).not.toBe(deterministicFirstPlanId)
+
   const selectedCard = page.locator('article.result-card.selected')
+  await expect(selectedCard.locator('.score')).toContainText('#2')
   await expect(selectedCard).toHaveAttribute('data-plan-id', primaryPlanId!)
   const aiVenueId = await selectedCard.getAttribute('data-ai-venue-id')
   expect(aiVenueId).toBeTruthy()
   await expect(selectedCard).toHaveAttribute('data-venue-id', aiVenueId!)
 
+  const planTitle = await selectedCard.getByRole('heading').innerText()
+  const venueName = await selectedCard.locator('.result-meta > div').filter({ hasText: 'Plan anchor' }).locator('dd').innerText()
+  const meetArea = await selectedCard.locator('.result-meta > div').filter({ hasText: 'Area' }).locator('dd').innerText()
+  await selectedCard.getByRole('button', { name: 'Save for later' }).click()
   await selectedCard.getByRole('button', { name: 'Open plan' }).click()
+
   const itinerary = page.locator('.itinerary')
   await expect(itinerary).toHaveAttribute('data-plan-id', primaryPlanId!)
   await expect(itinerary).toHaveAttribute('data-venue-id', aiVenueId!)
+  await expect(itinerary.getByRole('heading', { name: planTitle })).toBeVisible()
+  await expect(itinerary.locator('.timeline-place').first()).toContainText(venueName)
+  const anchorMapsLink = itinerary.getByRole('link', { name: 'Open anchor in Maps' })
+  const anchorMapsHref = await anchorMapsLink.getAttribute('href')
+  expect(anchorMapsHref).toMatch(/^https:\/\//)
+
+  await itinerary.getByText('More tools', { exact: true }).click()
+  await itinerary.getByRole('button', { name: 'Edit invite' }).click()
+  const inviteDialog = page.getByRole('dialog', { name: 'Invite starter' })
+  const invite = await inviteDialog.getByRole('textbox').inputValue()
+  expect(invite).toContain(`Plan: ${planTitle}`)
+  expect(invite).toContain(`Public meet area: ${meetArea}`)
+  expect(invite).toContain(venueName)
+  await inviteDialog.getByRole('button', { name: 'Close' }).click()
+
+  await itinerary.getByRole('button', { name: 'Safety share' }).click()
+  const safetyDialog = page.getByRole('dialog', { name: 'Safety share' })
+  const safety = await safetyDialog.getByRole('textbox').inputValue()
+  expect(safety).toContain(`Public meet area: ${meetArea}`)
+  expect(safety).toContain(venueName)
+  await safetyDialog.getByRole('button', { name: 'Close' }).click()
+
+  await page.getByRole('button', { name: 'Alerts', exact: true }).click()
+  await expect(page.getByText(`Two hours before: review ${planTitle}. First stop: ${venueName}.`, { exact: true })).toBeVisible()
+  await expect(page.locator('.tonight-card')).toContainText(`Anchor: ${venueName}`)
+
+  const [savedRecord] = await page.evaluate(() => JSON.parse(localStorage.getItem('lumadate-saved') ?? '[]'))
+  expect(savedRecord).toMatchObject({
+    planId: primaryPlanId,
+    title: planTitle,
+    meetArea,
+    venueId: aiVenueId,
+    venueName,
+    anchorName: venueName,
+    anchorMapsLink: anchorMapsHref,
+  })
+
+  await page.getByRole('button', { name: 'Saved (1)' }).click()
+  const savedDialog = page.getByRole('dialog', { name: 'Saved plans' })
+  const savedCard = savedDialog.locator('.saved-card')
+  await expect(savedCard).toContainText(planTitle)
+  await expect(savedCard).toContainText(meetArea)
+  await expect(savedCard).toContainText(`Venue: ${venueName}`)
+  await savedCard.getByRole('button', { name: 'Open' }).click()
+  await expect(page.locator('.itinerary')).toHaveAttribute('data-plan-id', primaryPlanId!)
+  await expect(page.locator('.itinerary')).toHaveAttribute('data-venue-id', aiVenueId!)
+  await expect(page.getByRole('link', { name: 'Open anchor in Maps' })).toHaveAttribute('href', anchorMapsHref!)
   await expectNoHorizontalOverflow(page)
 })
 
