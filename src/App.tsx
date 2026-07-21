@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import plansJson from './data/datePlans.json'
-import { recommendablePortlandVenues, type CuratedVenueKind } from './data/portlandVenues'
+import { recommendablePortlandVenues, type CuratedVenue, type CuratedVenueKind } from './data/portlandVenues'
 import lumaDateEmblem from './assets/lumadate-emblem.png'
 import {
   findAreaPairing,
@@ -9,6 +9,16 @@ import {
   type CuratedVenueMatch,
 } from './lib/curatedVenueRecommendations'
 import { mockWeatherAtArrival } from './lib/mockItinerarySignals'
+import {
+  composeAiItinerarySafely,
+  createAiItineraryRequest,
+  getAiFeatureMode,
+  mockItineraryComposer,
+  reasonCodesToCopy,
+  type AiItineraryCandidate,
+  type AiItineraryComposition,
+  type AiReasonCode,
+} from './ai/itineraryComposer'
 import './App.css'
 
 type MeetingMode = 'near_me' | 'near_them' | 'fair_midpoint' | 'neutral_public'
@@ -515,9 +525,15 @@ function preferredVenueKinds(plan: DatePlan): CuratedVenueKind[] {
   return isCoffeePlan ? ['cafe', 'dessert'] : ['restaurant']
 }
 
+function curatedVenueAreaForPlan(intake: Intake, plan: DatePlan): string {
+  return plan.neighborhoods.find((area) => areaLabelsMatch(intake.dateArea, area))
+    ?? plan.neighborhoods[0]
+    ?? intake.dateArea
+}
+
 function curatedVenuesForPlan(intake: Intake, plan: DatePlan, limit = 4): CuratedVenueMatch[] {
   const preferredKinds = preferredVenueKinds(plan)
-  const planArea = plan.neighborhoods[0] ?? intake.dateArea
+  const planArea = curatedVenueAreaForPlan(intake, plan)
   const matches = recommendCuratedVenues({
     area: planArea,
     categories: [...intake.activityTypes, ...intake.moodTypes, ...plan.tags, ...plan.interestKeywords],
@@ -541,10 +557,22 @@ function curatedVenuesForPlan(intake: Intake, plan: DatePlan, limit = 4): Curate
   return ordered.slice(0, limit)
 }
 
-function automaticVenueForPlan(plan: DatePlan, matches: CuratedVenueMatch[]): CuratedVenueMatch | undefined {
+function automaticVenueForPlan(
+  plan: DatePlan,
+  matches: CuratedVenueMatch[],
+  planArea: string,
+): CuratedVenueMatch | undefined {
   const kinds = preferredVenueKinds(plan)
-  const planArea = plan.neighborhoods[0] ?? ''
   return matches.find(({ venue }) => kinds.includes(venue.kind) && areaLabelsMatch(planArea, venue.area))
+}
+
+function venuePriceTierFitsBudget(budgetMax: number, venue: CuratedVenue): boolean {
+  const affordableTier = budgetMax <= 70 ? 1 : budgetMax <= 120 ? 2 : budgetMax <= 250 ? 3 : 4
+  return venue.priceTierEstimate <= affordableTier
+}
+
+function venueMatchesAlcoholPreference(intake: Intake, venue: CuratedVenue): boolean {
+  return intake.alcoholPreference === 'alcohol_ok' || venue.alcoholFit !== 'bar-forward'
 }
 
 function cleanLabel(value: string): string {
@@ -601,13 +629,20 @@ function curatedVenuePlace(match: CuratedVenueMatch): Place {
   }
 }
 
+function canonicalCuratedVenueMatch(match?: CuratedVenueMatch): CuratedVenueMatch | undefined {
+  if (!match) return undefined
+  const venue = recommendablePortlandVenues.find((candidate) => candidate.id === match.venue.id)
+  return venue ? { ...match, venue } : undefined
+}
+
 export function canonicalPlanFor(
   ranked: RankedPlan,
   intake: Intake,
   selectedVenue?: CuratedVenueMatch,
 ): CanonicalPlan {
   const places = new Map((ranked.plan.places ?? []).map((place) => [place.id, place]))
-  const replacement = selectedVenue ? curatedVenuePlace(selectedVenue) : undefined
+  const canonicalVenue = canonicalCuratedVenueMatch(selectedVenue)
+  const replacement = canonicalVenue ? curatedVenuePlace(canonicalVenue) : undefined
   const stops = ranked.plan.itinerary.map((step) => ({
     ...step,
     place: replacement && step.placeId === ranked.plan.replaceablePlaceId
@@ -622,7 +657,7 @@ export function canonicalPlanFor(
   return {
     planId: ranked.plan.id,
     title: ranked.plan.title,
-    meetArea: meetAreaFor(intake, ranked.plan),
+    meetArea: meetAreaFor(intake, ranked.plan, canonicalVenue),
     anchorPlace,
     stops,
   }
@@ -765,8 +800,17 @@ function dressWeatherNote(ranked: RankedPlan): string {
   return 'Keep it casual and weather-safe.'
 }
 
-export function meetAreaFor(intake: Intake, plan: DatePlan): string {
-  const publicArea = plan.neighborhoods[0] ?? (intake.dateArea || 'Portland public area')
+export function meetAreaFor(intake: Intake, plan: DatePlan, selectedVenue?: CuratedVenueMatch): string {
+  const canonicalVenue = canonicalCuratedVenueMatch(selectedVenue)
+  const selectedVenueDefinesMeetArea = Boolean(
+    canonicalVenue
+    && plan.replaceablePlaceId
+    && (plan.featuredPlaceId === plan.replaceablePlaceId || plan.itinerary[0]?.placeId === plan.replaceablePlaceId),
+  )
+  const publicArea = (selectedVenueDefinesMeetArea ? canonicalVenue?.venue.area : undefined)
+    ?? plan.neighborhoods.find((area) => areaLabelsMatch(intake.dateArea, area))
+    ?? plan.neighborhoods[0]
+    ?? 'Portland public area'
   if (intake.meetingMode === 'fair_midpoint') return `Public midpoint in ${publicArea}`
   if (intake.meetingMode === 'neutral_public') return `${publicArea} public meet point`
   return `Public meet point in ${publicArea}`
@@ -777,7 +821,7 @@ function planMatchesAlcohol(intake: Intake, plan: DatePlan): boolean {
   return !plan.safetyProfile.alcoholCentric && !plan.tags.some((tag) => tag.includes('bar'))
 }
 
-export function rankPlans(intake: Intake): RankedPlan[] {
+function rankAllPlans(intake: Intake): RankedPlan[] {
   const dateWords = extractKeywords(intake.dateEnjoysText)
   const userWords = extractKeywords(intake.userEnjoysText)
   const cuisineWords = extractKeywords(intake.cuisineLikes)
@@ -915,10 +959,249 @@ export function rankPlans(intake: Intake): RankedPlan[] {
       if (a.budgetFits !== b.budgetFits) return Number(b.budgetFits) - Number(a.budgetFits)
       return b.score - a.score
     })
-    .slice(0, 3)
+}
+
+export function rankPlans(intake: Intake): RankedPlan[] {
+  return rankAllPlans(intake).slice(0, 3)
+}
+
+export function aiCandidateInputsFor(intake: Intake, rankedPlans: RankedPlan[]): AiItineraryCandidate[] {
+  return rankedPlans.map((ranked) => {
+    const { plan } = ranked
+    const firstDateSafetyRequired = intake.firstDateSafeMode || intake.dateStage === 'first_date'
+    const alcoholCompatible = planMatchesAlcohol(intake, plan)
+    const safetyEligible = plan.safetyProfile.publicPlace
+      && (!firstDateSafetyRequired || plan.safetyProfile.goodForFirstDate)
+      && alcoholCompatible
+    const preferredKinds = preferredVenueKinds(plan)
+    const venueOptions = curatedVenuesForPlan(intake, plan)
+      .filter(({ venue }) => (
+        areaLabelsMatch(intake.dateArea, venue.area)
+        && preferredKinds.includes(venue.kind)
+        && venuePriceTierFitsBudget(intake.budgetMax, venue)
+        && venueMatchesAlcoholPreference(intake, venue)
+        && venue.status === 'active'
+      ))
+      .map(({ venue }) => ({
+        venueId: venue.id,
+        areaMatch: true,
+        categoryMatch: true,
+        available: true,
+      }))
+    const planTerms = new Set([...plan.tags, ...plan.interestKeywords].map((term) => term.toLowerCase()))
+    const structuredInterests = [...intake.activityTypes, ...intake.moodTypes]
+      .map((term) => term.toLowerCase())
+    const quietRequested = structuredInterests.some((term) => (
+      ['quiet', 'quiet_conversation', 'low_crowd', 'cozy_cafe', 'easy_exit'].includes(term)
+    ))
+    const quietFit = quietRequested && [...planTerms].some((term) => /quiet|low pressure|coffee|cafe|bookstore|park|walk/.test(term))
+    const interestMatch = structuredInterests.some((term) => planTerms.has(term))
+    const weatherSafe = intake.indoorOutdoor === 'weather_safe' && plan.safetyProfile.indoor
+    const reasonCodes: AiReasonCode[] = [
+      ...(ranked.areaMatch ? ['AREA_MATCH' as const] : []),
+      ...(ranked.budgetFits ? ['BUDGET_MATCH' as const] : []),
+      ...(quietFit ? ['QUIET_FIT' as const] : []),
+      ...(interestMatch ? ['INTEREST_MATCH' as const] : []),
+      ...(plan.safetyProfile.publicPlace && plan.safetyProfile.goodForFirstDate && alcoholCompatible
+        ? ['FIRST_DATE_SAFE' as const]
+        : []),
+      ...(weatherSafe ? ['WEATHER_SAFE' as const] : []),
+      ...(plan.backupOptions.length > 0 ? ['BACKUP_AVAILABLE' as const] : []),
+    ]
+
+    return {
+      planId: plan.id,
+      estimatedCostHigh: ranked.estimatedCostHigh,
+      durationMinutes: plan.estimatedDurationMinutes,
+      areaMatch: ranked.areaMatch,
+      budgetFits: ranked.budgetFits,
+      safetyEligible,
+      venueOptions,
+      reasonCodes,
+    }
+  })
+}
+
+export function aiCompositionDisclosure(providerMode: AiItineraryComposition['providerMode']) {
+  if (providerMode === 'fallback') {
+    return {
+      eyebrow: 'Deterministic fallback',
+      title: 'AI preview unavailable — no AI selection applied',
+      detail: 'LumaDate kept the original deterministic plan ranking and eligible venue choices.',
+    }
+  }
+  if (providerMode === 'hosted') {
+    return {
+      eyebrow: 'AI-assisted composition',
+      title: 'AI-assisted composition — validated by LumaDate',
+      detail: 'LumaDate controls every plan, venue, and visible explanation shown below.',
+    }
+  }
+  return {
+    eyebrow: 'AI foundation preview',
+    title: 'AI foundation preview — safe mock, no hosted model connected',
+    detail: 'LumaDate controls every plan, venue, and visible explanation shown below.',
+  }
+}
+
+export function aiCompositionToast(providerMode: AiItineraryComposition['providerMode']): string {
+  if (providerMode === 'fallback') return 'AI preview unavailable - deterministic plans kept.'
+  if (providerMode === 'hosted') return 'Validated AI composition generated - pick one to inspect.'
+  return 'Safe mock composition generated - pick one to inspect.'
+}
+
+export function aiCompositionApplicationDecision(composition: AiItineraryComposition) {
+  const appliesAiSelection = composition.providerMode !== 'fallback'
+  return {
+    activePlanId: appliesAiSelection && composition.primaryPlanId ? composition.primaryPlanId : null,
+    displayedPlans: appliesAiSelection ? composition.plans : [],
+    disclosure: aiCompositionDisclosure(composition.providerMode),
+    toast: aiCompositionToast(composition.providerMode),
+  }
+}
+
+export type AiVenueSelectionState = {
+  selectedVenueByPlan: Record<string, string>
+  ownedByAi: Record<string, string>
+}
+
+export function nextAiVenueSelectionState(
+  current: Record<string, string>,
+  ownedByAi: Record<string, string>,
+  composition: AiItineraryComposition | null,
+): AiVenueSelectionState {
+  const selectedVenueByPlan = { ...current }
+
+  for (const [planId, venueId] of Object.entries(ownedByAi)) {
+    if (selectedVenueByPlan[planId] === venueId) delete selectedVenueByPlan[planId]
+  }
+
+  const nextOwnedByAi: Record<string, string> = {}
+  if (composition?.providerMode !== 'fallback') {
+    for (const plan of composition?.plans ?? []) {
+      if (plan.venueId && selectedVenueByPlan[plan.planId] === undefined) {
+        selectedVenueByPlan[plan.planId] = plan.venueId
+        nextOwnedByAi[plan.planId] = plan.venueId
+      }
+    }
+  }
+
+  return { selectedVenueByPlan, ownedByAi: nextOwnedByAi }
+}
+
+export function syncSavedItinerariesWithVenueSelections(
+  saved: SavedItinerary[],
+  selectedVenueByPlan: Record<string, string>,
+  rankedPlans: RankedPlan[],
+  intake: Intake,
+): SavedItinerary[] {
+  const allRankedPlans = rankAllPlans(intake)
+  return saved.map((item) => {
+    const ranked = rankedPlans.find((candidate) => candidate.plan.id === item.planId)
+      ?? allRankedPlans.find((candidate) => candidate.plan.id === item.planId)
+    if (!ranked) return item
+
+    const matches = curatedVenuesForPlan(intake, ranked.plan)
+    const selectedVenue = matches.find(({ venue }) => venue.id === selectedVenueByPlan[item.planId])
+      ?? automaticVenueForPlan(ranked.plan, matches, curatedVenueAreaForPlan(intake, ranked.plan))
+    const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
+    return {
+      ...item,
+      title: canonical.title,
+      meetArea: canonical.meetArea,
+      venueId: selectedVenue?.venue.id,
+      venueName: selectedVenue?.venue.name,
+      stopIds: canonical.stops.map((stop) => stop.id),
+      anchorName: canonical.anchorPlace?.name,
+      anchorMapsLink: canonical.anchorPlace?.mapsLink,
+    }
+  })
+}
+
+export function syncSavedItinerariesAfterAiInvalidation(
+  saved: SavedItinerary[],
+  selectedVenueByPlan: Record<string, string>,
+  ownedByAi: Record<string, string>,
+  nextIntake: Intake,
+): SavedItinerary[] {
+  const nextVenueState = nextAiVenueSelectionState(selectedVenueByPlan, ownedByAi, null)
+  return syncSavedItinerariesWithVenueSelections(
+    saved,
+    nextVenueState.selectedVenueByPlan,
+    rankAllPlans(nextIntake),
+    nextIntake,
+  )
+}
+
+export function syncSavedItinerariesAfterIntakeReplacement(
+  saved: SavedItinerary[],
+  nextIntake: Intake,
+): SavedItinerary[] {
+  return syncSavedItinerariesWithVenueSelections(
+    saved,
+    {},
+    rankAllPlans(nextIntake),
+    nextIntake,
+  )
+}
+
+type AiGenerationToken = {
+  epoch: number
+  controller: AbortController
+}
+
+export type AiGenerationCoordinator = {
+  begin: () => AiGenerationToken
+  invalidate: () => void
+  isCurrent: (token: AiGenerationToken) => boolean
+  finish: (token: AiGenerationToken) => void
+}
+
+export function createAiGenerationCoordinator(): AiGenerationCoordinator {
+  let epoch = 0
+  let activeController: AbortController | null = null
+
+  return {
+    begin() {
+      activeController?.abort()
+      epoch += 1
+      activeController = new AbortController()
+      return { epoch, controller: activeController }
+    },
+    invalidate() {
+      epoch += 1
+      activeController?.abort()
+      activeController = null
+    },
+    isCurrent(token) {
+      return token.epoch === epoch
+        && token.controller === activeController
+        && !token.controller.signal.aborted
+    },
+    finish(token) {
+      if (token.epoch === epoch && token.controller === activeController) activeController = null
+    },
+  }
+}
+
+export async function runCurrentAiGeneration<T>(
+  coordinator: AiGenerationCoordinator,
+  task: (signal: AbortSignal) => Promise<T>,
+  apply: (value: T) => void,
+): Promise<boolean> {
+  const token = coordinator.begin()
+  try {
+    const value = await task(token.controller.signal)
+    if (!coordinator.isCurrent(token)) return false
+    apply(value)
+    return true
+  } finally {
+    coordinator.finish(token)
+  }
 }
 
 function App() {
+  const aiFeatureMode = getAiFeatureMode(window.location.search)
   const [started, setStarted] = useState(false)
   const [experienceMode, setExperienceMode] = useState<'personal' | 'demo'>('personal')
   const [entryIntent, setEntryIntent] = useState<EntryIntent | null>(null)
@@ -937,16 +1220,28 @@ function App() {
   )
   const [saved, setSaved] = useState<SavedItinerary[]>(() => parseStored(storageKeys.saved, []))
   const [selectedVenueByPlan, setSelectedVenueByPlan] = useState<Record<string, string>>({})
+  const [aiOwnedVenueByPlan, setAiOwnedVenueByPlan] = useState<Record<string, string>>({})
+  const [aiComposition, setAiComposition] = useState<AiItineraryComposition | null>(null)
   const entryTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const intakeRef = useRef(intake)
+  const selectedVenueByPlanRef = useRef(selectedVenueByPlan)
+  const aiOwnedVenueByPlanRef = useRef(aiOwnedVenueByPlan)
+  const aiGenerationCoordinatorRef = useRef<AiGenerationCoordinator | null>(null)
+  const aiGenerationCoordinator = aiGenerationCoordinatorRef.current ?? createAiGenerationCoordinator()
+  aiGenerationCoordinatorRef.current = aiGenerationCoordinator
+  intakeRef.current = intake
+  selectedVenueByPlanRef.current = selectedVenueByPlan
+  aiOwnedVenueByPlanRef.current = aiOwnedVenueByPlan
 
-  const rankedPlans = useMemo(() => rankPlans(intake), [intake])
-  const active = rankedPlans.find((item) => item.plan.id === activeId) ?? rankedPlans[0]
+  const allRankedPlans = useMemo(() => rankAllPlans(intake), [intake])
+  const rankedPlans = useMemo(() => allRankedPlans.slice(0, 3), [allRankedPlans])
+  const active = allRankedPlans.find((item) => item.plan.id === activeId) ?? rankedPlans[0]
   const venueSuggestionsByPlan = useMemo(() => Object.fromEntries(
-    rankedPlans.map((ranked) => [ranked.plan.id, curatedVenuesForPlan(intake, ranked.plan)]),
-  ) as Record<string, CuratedVenueMatch[]>, [intake, rankedPlans])
+    allRankedPlans.map((ranked) => [ranked.plan.id, curatedVenuesForPlan(intake, ranked.plan)]),
+  ) as Record<string, CuratedVenueMatch[]>, [allRankedPlans, intake])
   const venueSuggestions = venueSuggestionsByPlan[active.plan.id] ?? []
   const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
-    ?? automaticVenueForPlan(active.plan, venueSuggestions)
+    ?? automaticVenueForPlan(active.plan, venueSuggestions, curatedVenueAreaForPlan(intake, active.plan))
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -960,24 +1255,68 @@ function App() {
     localStorage.setItem(storageKeys.saved, JSON.stringify(saved))
   }, [saved])
 
+  useEffect(() => () => aiGenerationCoordinator.invalidate(), [aiGenerationCoordinator])
+
   useEffect(() => {
-    if (!rankedPlans.some((item) => item.plan.id === activeId) && rankedPlans[0]) {
+    if (!allRankedPlans.some((item) => item.plan.id === activeId) && rankedPlans[0]) {
       setActiveId(rankedPlans[0].plan.id)
     }
-  }, [activeId, rankedPlans])
+  }, [activeId, allRankedPlans, rankedPlans])
+
+  function commitAiVenueSelectionState(state: AiVenueSelectionState) {
+    selectedVenueByPlanRef.current = state.selectedVenueByPlan
+    aiOwnedVenueByPlanRef.current = state.ownedByAi
+    setSelectedVenueByPlan(state.selectedVenueByPlan)
+    setAiOwnedVenueByPlan(state.ownedByAi)
+  }
+
+  function invalidateAiComposition(nextIntake: Intake) {
+    aiGenerationCoordinator.invalidate()
+    const previousSelectedVenueByPlan = selectedVenueByPlanRef.current
+    const previousOwnedByAi = aiOwnedVenueByPlanRef.current
+    const nextVenueState = nextAiVenueSelectionState(
+      previousSelectedVenueByPlan,
+      previousOwnedByAi,
+      null,
+    )
+    commitAiVenueSelectionState(nextVenueState)
+    setAiComposition(null)
+    setSaved((current) => syncSavedItinerariesAfterAiInvalidation(
+      current,
+      previousSelectedVenueByPlan,
+      previousOwnedByAi,
+      nextIntake,
+    ))
+  }
+
+  function commitIntake(update: (current: Intake) => Intake) {
+    const nextIntake = update(intakeRef.current)
+    intakeRef.current = nextIntake
+    invalidateAiComposition(nextIntake)
+    setIntake(nextIntake)
+  }
+
+  function replaceIntake(nextIntake: Intake) {
+    aiGenerationCoordinator.invalidate()
+    commitAiVenueSelectionState({ selectedVenueByPlan: {}, ownedByAi: {} })
+    setAiComposition(null)
+    setSaved((current) => syncSavedItinerariesAfterIntakeReplacement(current, nextIntake))
+    intakeRef.current = nextIntake
+    setIntake(nextIntake)
+  }
 
   function updateIntake<K extends keyof Intake>(key: K, value: Intake[K]) {
-    setIntake((current) => ({ ...current, [key]: value }))
+    commitIntake((current) => ({ ...current, [key]: value }))
   }
 
   function updateMeetupStyle(value: MeetupStyle) {
     const meetingMode: MeetingMode =
       value === 'fair_midpoint' ? 'fair_midpoint' : value === 'neutral_public' ? 'neutral_public' : 'near_me'
-    setIntake((current) => ({ ...current, meetupStyle: value, meetingMode }))
+    commitIntake((current) => ({ ...current, meetupStyle: value, meetingMode }))
   }
 
   function toggleActivity(value: string) {
-    setIntake((current) => {
+    commitIntake((current) => {
       const exists = current.activityTypes.includes(value)
       return {
         ...current,
@@ -989,7 +1328,7 @@ function App() {
   }
 
   function toggleMood(value: string) {
-    setIntake((current) => {
+    commitIntake((current) => {
       const exists = current.moodTypes.includes(value)
       return {
         ...current,
@@ -999,7 +1338,7 @@ function App() {
   }
 
   function toggleAvoid(value: string) {
-    setIntake((current) => {
+    commitIntake((current) => {
       const items = current.mustAvoid
         .split(',')
         .map((item) => item.trim())
@@ -1034,7 +1373,7 @@ function App() {
   function selectedVenueFor(ranked: RankedPlan): CuratedVenueMatch | undefined {
     const matches = venueSuggestionsByPlan[ranked.plan.id] ?? []
     return matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id])
-      ?? automaticVenueForPlan(ranked.plan, matches)
+      ?? automaticVenueForPlan(ranked.plan, matches, curatedVenueAreaForPlan(intake, ranked.plan))
   }
 
   function savePlan(ranked: RankedPlan) {
@@ -1061,9 +1400,45 @@ function App() {
     showToast(`${ranked.plan.title} saved for later`)
   }
 
-  function showItinerary() {
-    setTab('options')
-    showToast('Plans generated - pick one to inspect.')
+  async function showItinerary() {
+    if (aiFeatureMode === 'deterministic') {
+      invalidateAiComposition(intakeRef.current)
+      setTab('options')
+      showToast('Plans generated - pick one to inspect.')
+      window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
+      return
+    }
+
+    const intakeSnapshot = intakeRef.current
+    const rankedPlansSnapshot = rankPlans(intakeSnapshot)
+    const request = createAiItineraryRequest({
+      intake: intakeSnapshot,
+      candidates: aiCandidateInputsFor(intakeSnapshot, rankedPlansSnapshot),
+    })
+    const applied = await runCurrentAiGeneration(
+      aiGenerationCoordinator,
+      (signal) => composeAiItinerarySafely(request, mockItineraryComposer, { trustedMode: 'mock', signal }),
+      (composition) => {
+        const applicationDecision = aiCompositionApplicationDecision(composition)
+        const nextVenueState = nextAiVenueSelectionState(
+          selectedVenueByPlanRef.current,
+          aiOwnedVenueByPlanRef.current,
+          composition,
+        )
+        setAiComposition(composition)
+        commitAiVenueSelectionState(nextVenueState)
+        setSaved((current) => syncSavedItinerariesWithVenueSelections(
+          current,
+          nextVenueState.selectedVenueByPlan,
+          rankedPlansSnapshot,
+          intakeSnapshot,
+        ))
+        if (applicationDecision.activePlanId) setActiveId(applicationDecision.activePlanId)
+        setTab('options')
+        showToast(applicationDecision.toast)
+      },
+    )
+    if (!applied) return
     window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
   }
 
@@ -1087,7 +1462,16 @@ function App() {
     const match = venueSuggestions.find(({ venue }) => venue.id === venueId)
     if (!match) return
     const canonical = canonicalPlanFor(active, intake, match)
-    setSelectedVenueByPlan((current) => ({ ...current, [active.plan.id]: venueId }))
+    const selected = { ...selectedVenueByPlanRef.current, [active.plan.id]: venueId }
+    const ownedByAi = { ...aiOwnedVenueByPlanRef.current }
+    delete ownedByAi[active.plan.id]
+    commitAiVenueSelectionState({ selectedVenueByPlan: selected, ownedByAi })
+    setAiComposition((current) => current ? {
+      ...current,
+      plans: current.plans.map((plan) => plan.planId === active.plan.id
+        ? { ...plan, venueId: undefined }
+        : plan),
+    } : null)
     setSaved((current) => current.map((item) => item.planId === active.plan.id
       ? {
         ...item,
@@ -1121,9 +1505,8 @@ function App() {
     }
     const nextIntake = createDefaultIntake()
     setSheet(null)
-    setIntake(nextIntake)
+    replaceIntake(nextIntake)
     setExperienceMode('personal')
-    setSelectedVenueByPlan({})
     setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('plan')
@@ -1139,9 +1522,8 @@ function App() {
   function startDemo() {
     const nextIntake = createExampleIntake()
     setSheet(null)
-    setIntake(nextIntake)
+    replaceIntake(nextIntake)
     setExperienceMode('demo')
-    setSelectedVenueByPlan({})
     setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('options')
@@ -1150,12 +1532,16 @@ function App() {
   }
 
   function clearDemoData() {
+    aiGenerationCoordinator.invalidate()
     localStorage.removeItem(storageKeys.intake)
     localStorage.removeItem(storageKeys.saved)
     localStorage.removeItem(storageKeys.reminders)
-    setIntake(createDefaultIntake())
+    const nextIntake = createDefaultIntake()
+    intakeRef.current = nextIntake
+    setIntake(nextIntake)
     setExperienceMode('personal')
-    setSelectedVenueByPlan({})
+    commitAiVenueSelectionState({ selectedVenueByPlan: {}, ownedByAi: {} })
+    setAiComposition(null)
     setSaved([])
     setReminders(defaultReminders)
     showToast('Planning data cleared')
@@ -1241,6 +1627,7 @@ function App() {
             <ResultsPanel
               rankedPlans={rankedPlans}
               intake={intake}
+              aiComposition={aiComposition}
               activeId={active.plan.id}
               venuesByPlan={venueSuggestionsByPlan}
               selectedVenueByPlan={selectedVenueByPlan}
@@ -1320,7 +1707,7 @@ function App() {
             <GuidanceCard step={wizardStep} intake={intake} />
           ) : (
             <>
-              <PrivacyCard intake={intake} ranked={active} />
+              <PrivacyCard intake={intake} ranked={active} selectedVenue={selectedVenueMatch} />
               {(tab === 'options' || tab === 'alerts') && <ForecastCard ranked={active} intake={intake} />}
             </>
           )}
@@ -1389,7 +1776,10 @@ function App() {
           onOpen={(item) => {
             setActiveId(item.planId)
             if (item.venueId) {
-              setSelectedVenueByPlan((current) => ({ ...current, [item.planId]: item.venueId ?? '' }))
+              const selectedVenueByPlan = { ...selectedVenueByPlanRef.current, [item.planId]: item.venueId }
+              const ownedByAi = { ...aiOwnedVenueByPlanRef.current }
+              delete ownedByAi[item.planId]
+              commitAiVenueSelectionState({ selectedVenueByPlan, ownedByAi })
             }
             setTab('itinerary')
             setSheet(null)
@@ -2276,6 +2666,7 @@ function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step:
 function ResultsPanel({
   rankedPlans,
   intake,
+  aiComposition,
   activeId,
   venuesByPlan,
   selectedVenueByPlan,
@@ -2286,6 +2677,7 @@ function ResultsPanel({
 }: {
   rankedPlans: RankedPlan[]
   intake: Intake
+  aiComposition: AiItineraryComposition | null
   activeId: string
   venuesByPlan: Record<string, CuratedVenueMatch[]>
   selectedVenueByPlan: Record<string, string>
@@ -2294,6 +2686,9 @@ function ResultsPanel({
   onSave: (ranked: RankedPlan) => void
   onAdjust: (ranked: RankedPlan) => void
 }) {
+  const applicationDecision = aiComposition ? aiCompositionApplicationDecision(aiComposition) : null
+  const disclosure = applicationDecision?.disclosure ?? null
+
   return (
     <section className="surface">
       <div className="section-heading">
@@ -2301,13 +2696,26 @@ function ResultsPanel({
         <h2>Three ways the date could go.</h2>
         <p>Open one, save it for later, or adjust it without changing the other options.</p>
       </div>
+      {aiComposition && disclosure && (
+        <div
+          className="itinerary-verification-note ai-composition-note"
+          role="status"
+          aria-label="AI composition summary"
+          data-primary-plan-id={applicationDecision?.activePlanId ?? ''}
+        >
+          <span className="eyebrow">{disclosure.eyebrow}</span>
+          <strong>{disclosure.title}</strong>
+          <p>{disclosure.detail}</p>
+        </div>
+      )}
       <div className="alpha-plan-ribbon">Curated Portland suggestions. Verify current hours, routes, prices, and availability.</div>
       <div className="result-list">
         {rankedPlans.map((ranked, index) => {
           const venues = venuesByPlan[ranked.plan.id] ?? []
           const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id])
-            ?? automaticVenueForPlan(ranked.plan, venues)
+            ?? automaticVenueForPlan(ranked.plan, venues, curatedVenueAreaForPlan(intake, ranked.plan))
           const canonical = canonicalPlanFor(ranked, intake, venue)
+          const composedPlan = applicationDecision?.displayedPlans.find((plan) => plan.planId === ranked.plan.id)
           const isSaved = saved.some((item) => (
             item.planId === ranked.plan.id && (item.venueId ?? '') === (venue?.venue.id ?? '')
           ))
@@ -2316,6 +2724,9 @@ function ResultsPanel({
             <article
               key={ranked.plan.id}
               className={activeId === ranked.plan.id ? 'result-card selected' : 'result-card'}
+              data-plan-id={ranked.plan.id}
+              data-venue-id={venue?.venue.id ?? ''}
+              data-ai-venue-id={composedPlan?.venueId ?? ''}
             >
               <div className="result-card-heading">
                 <span className="score">#{index + 1} {fitLabel(ranked, index)}</span>
@@ -2329,7 +2740,7 @@ function ResultsPanel({
                 <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
                 <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
               </dl>
-              <p className="result-reason">{ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
+              <p className="result-reason">{composedPlan ? reasonCodesToCopy(composedPlan.reasonCodes) : ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
               {ranked.warnings.length > 0 && (
                 <div className="result-warnings" aria-label="Plan tradeoffs">
                   {ranked.warnings.map((warning) => <span key={warning}>{warning}</span>)}
@@ -2511,7 +2922,12 @@ function ItineraryPanel({
   const inviteText = inviteTextFor(ranked, intake, inviteDraft, selectedVenue)
 
   return (
-    <section className="surface itinerary" tabIndex={-1}>
+    <section
+      className="surface itinerary"
+      tabIndex={-1}
+      data-plan-id={canonical.planId}
+      data-venue-id={selectedVenue?.venue.id ?? ''}
+    >
       <PlanSummaryCard
         ranked={ranked}
         intake={intake}
@@ -2907,12 +3323,21 @@ function SavedSheet({
   )
 }
 
-function PrivacyCard({ intake, ranked }: { intake: Intake; ranked: RankedPlan }) {
+function PrivacyCard({
+  intake,
+  ranked,
+  selectedVenue,
+}: {
+  intake: Intake
+  ranked: RankedPlan
+  selectedVenue?: CuratedVenueMatch
+}) {
+  const canonical = canonicalPlanFor(ranked, intake, selectedVenue)
   return (
     <section className="side-card">
       <span className="eyebrow">Privacy-aware meet point</span>
       <h3>{meetingLabels[intake.meetingMode]}</h3>
-      <p>{ranked.meetArea}</p>
+      <p>{canonical.meetArea}</p>
       <small>Exact home or work addresses are not included in invites or safety shares.</small>
     </section>
   )
@@ -3440,7 +3865,7 @@ export function publicStopDetails(ranked: RankedPlan, intake: Intake, selectedVe
       time: offsetTime(intake.dateStart, step.timeOffsetMinutes),
       title: step.title,
       placeName: place?.name ?? step.title,
-      location: place ? `${place.neighborhood} · public place` : `${ranked.meetArea} · verify in app`,
+      location: place ? `${place.neighborhood} · public place` : `${canonical.meetArea} · verify in app`,
       mapsLink: place?.mapsLink,
       reviewLink: place?.reviewLink,
       qualities: [
