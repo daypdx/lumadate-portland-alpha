@@ -26,6 +26,8 @@ import {
   rankPlans,
   runCurrentAiGeneration,
   safetyText,
+  summarizeDatePlan,
+  summarizeInterests,
   syncSavedItinerariesAfterAiInvalidation,
   syncSavedItinerariesAfterIntakeReplacement,
   syncSavedItinerariesWithVenueSelections,
@@ -61,6 +63,18 @@ describe('Portland alpha planning safeguards', () => {
       },
     }
   }
+
+  it('summarizes the brief without treating sentence verbs as interests', () => {
+    const intake = {
+      ...createDefaultIntake(new Date(2026, 6, 17, 12, 0)),
+      dateArea: 'SE Portland',
+      dateEnjoysText: 'They love coffee, bookstores, quiet jazz, and walks.',
+    }
+
+    expect(summarizeDatePlan(intake)).toBe('First date in SE Portland · 2-3 hours · up to $120 total')
+    expect(summarizeInterests(intake)).toBe('coffee, bookstores, quiet, jazz, and walks.')
+    expect(summarizeInterests(intake)).not.toContain('love')
+  })
 
   it('keeps Concierge proposals behind the approved same-area venue gate', () => {
     const { intake } = pearlJazzScenario()
