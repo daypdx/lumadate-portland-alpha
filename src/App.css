@@ -4987,3 +4987,404 @@ body,
   cursor: default;
   opacity: 0.68;
 }
+
+/* Concierge adjustment preview. The planner remains authoritative until approval. */
+.concierge {
+  display: grid;
+  gap: 16px;
+  margin: 20px 0;
+  padding: 20px 0;
+  border-block: 1px solid var(--app-border);
+}
+
+.concierge-log {
+  display: grid;
+  gap: 10px;
+  max-height: 310px;
+  padding: 2px;
+  overflow-y: auto;
+  scrollbar-color: var(--app-primary) transparent;
+}
+
+.concierge-message {
+  width: fit-content;
+  max-width: min(86%, 560px);
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  color: var(--app-ink-soft);
+  line-height: 1.45;
+}
+
+.concierge-message span {
+  color: var(--app-primary-strong);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.concierge-message.assistant {
+  justify-self: start;
+  background: color-mix(in srgb, var(--app-surface-strong) 78%, transparent);
+}
+
+.concierge-message.user {
+  justify-self: end;
+  border-color: var(--app-border-strong);
+  background: var(--app-primary-soft);
+  color: var(--app-ink);
+}
+
+.concierge-suggestions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.concierge-suggestion {
+  min-width: 0;
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--app-plum-soft) 62%, transparent);
+  color: var(--app-ink-soft);
+  font-weight: 800;
+}
+
+.concierge-suggestion:hover {
+  border-color: var(--app-border-strong);
+  color: var(--app-primary-strong);
+}
+
+.concierge-form {
+  display: grid;
+  gap: 8px;
+}
+
+.concierge-form label {
+  color: var(--app-ink);
+  font-weight: 850;
+}
+
+.concierge-form > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.concierge-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  border-color: var(--app-border-strong);
+  background: color-mix(in srgb, var(--app-bg-deep) 58%, transparent);
+  color: var(--app-ink);
+}
+
+.concierge-input::placeholder {
+  color: var(--app-muted);
+}
+
+.concierge-form small {
+  color: var(--app-muted);
+  line-height: 1.4;
+}
+
+.concierge-proposal {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-primary-soft) 64%, var(--app-bg-deep));
+  box-shadow: var(--app-shadow-card);
+}
+
+.concierge-proposal-heading {
+  display: grid;
+  gap: 5px;
+}
+
+.concierge-proposal-heading h3,
+.concierge-proposal-heading p {
+  margin: 0;
+}
+
+.concierge-proposal-heading p {
+  color: var(--app-muted);
+}
+
+.concierge-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.concierge-plan {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  align-content: start;
+  padding: 14px;
+  border-left: 3px solid var(--app-muted);
+  background: color-mix(in srgb, var(--app-bg-deep) 62%, transparent);
+}
+
+.concierge-plan.after {
+  border-left-color: var(--app-safety);
+  background: var(--app-safety-soft);
+}
+
+.concierge-plan span {
+  color: var(--app-primary-strong);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.concierge-plan strong,
+.concierge-plan small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.concierge-plan strong {
+  color: var(--app-ink);
+  line-height: 1.3;
+}
+
+.concierge-plan small {
+  color: var(--app-muted);
+  line-height: 1.4;
+}
+
+.concierge-arrow {
+  align-self: center;
+  color: var(--app-primary-strong);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.concierge-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.concierge-actions button {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .concierge-suggestions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .concierge-comparison {
+    grid-template-columns: 1fr;
+  }
+
+  .concierge-arrow {
+    justify-self: center;
+  }
+}
+
+@media (max-width: 430px) {
+  .concierge {
+    gap: 14px;
+  }
+
+  .concierge-message {
+    max-width: 92%;
+  }
+
+  .concierge-form > div,
+  .concierge-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .concierge-form button,
+  .concierge-actions button {
+    width: 100%;
+  }
+}
+
+/* Variant B funnel and honest result hierarchy. */
+.main-grid.plan-only {
+  grid-template-columns: minmax(0, 900px);
+  justify-content: center;
+}
+
+.main-grid.plan-only .planner-column {
+  width: 100%;
+}
+
+.main-grid.plan-only .results-settings-only {
+  width: 100%;
+  max-width: 900px;
+  margin-top: 10px;
+}
+
+.step-section-heading {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.step-section-heading h3 {
+  margin: 0;
+  color: var(--app-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.intake-wizard .wizard-step + .wizard-step {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 1px solid var(--app-border);
+}
+
+.privacy-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--app-safety);
+  background: var(--app-safety-soft);
+  color: var(--app-muted);
+  line-height: 1.4;
+}
+
+.privacy-status strong {
+  color: var(--app-ink);
+}
+
+.progressive-options {
+  padding: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-bg-deep) 52%, transparent);
+}
+
+.progressive-options > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  color: var(--app-primary-strong);
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.progressive-options[open] {
+  padding: 0 14px 14px;
+}
+
+.progressive-options[open] > summary {
+  margin: 0 -14px 12px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.review-interests {
+  color: var(--app-ink-soft) !important;
+}
+
+.review-safety-options {
+  margin-top: 18px;
+}
+
+.result-group {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.result-group + .result-group {
+  margin-top: 34px;
+  padding-top: 28px;
+  border-top: 1px solid var(--app-border);
+}
+
+.result-group-heading {
+  display: grid;
+  gap: 5px;
+}
+
+.result-group-heading h3,
+.result-group-heading p {
+  margin: 0;
+}
+
+.result-group-heading h3 {
+  color: var(--app-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.result-group-heading p {
+  color: var(--app-muted);
+  line-height: 1.45;
+}
+
+.result-card.alternative {
+  border-color: color-mix(in srgb, var(--app-border) 78%, transparent);
+  background:
+    linear-gradient(145deg, rgba(57, 42, 50, 0.76), rgba(28, 23, 26, 0.78));
+  box-shadow: none;
+}
+
+.result-card.ai-preview-pick {
+  border-color: var(--app-border-strong);
+}
+
+.result-card-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.result-details {
+  border-top: 1px solid var(--app-border);
+  padding-top: 10px;
+}
+
+.result-details summary {
+  width: fit-content;
+  color: var(--app-primary-strong);
+  cursor: pointer;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.result-details p {
+  margin-top: 10px;
+  color: var(--app-muted);
+  line-height: 1.45;
+}
+
+.result-details small {
+  color: var(--app-muted);
+}
+
+.welcome-panel > .landing-promise {
+  color: var(--app-primary-strong);
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1.35;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+@media (max-width: 720px) {
+  .result-card-actions {
+    grid-template-columns: 1fr;
+  }
+}

@@ -2,15 +2,12 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function acknowledgeAndEnter(
   page: Page,
-  buttonName: 'Build my date plan' | 'See a Portland example',
+  buttonName: 'Build my plan' | 'Preview an example',
   path = '/',
 ) {
+  await page.addInitScript(() => sessionStorage.setItem('lumadate-alpha-acknowledged', 'true'))
   await page.goto(path)
   await page.getByRole('button', { name: buttonName }).click()
-  const dialog = page.getByRole('dialog', { name: 'Before you continue' })
-  await expect(dialog).toBeVisible()
-  await dialog.getByRole('checkbox').check()
-  await dialog.getByRole('button', { name: 'Continue' }).click()
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -20,33 +17,33 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 async function generatePearlJazzPlan(page: Page, path: '/' | '/?aiPreview=mock') {
-  await acknowledgeAndEnter(page, 'Build my date plan', path)
+  await acknowledgeAndEnter(page, 'Build my plan', path)
   await page.getByLabel('Planning area').selectOption('Pearl District')
   await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByText('More vibe and weather options', { exact: true }).click()
   await page.getByRole('radio', { name: 'indoor' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('radio', { name: 'Include food' }).click()
   await page.getByRole('button', { name: 'Treat night' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByText('Food & drink', { exact: true }).click()
   await page.getByRole('button', { name: 'sushi', exact: true }).click()
+  await page.getByText('Music & entertainment', { exact: true }).click()
   await page.getByRole('button', { name: 'jazz', exact: true }).click()
   await page.getByText('Culture & activity', { exact: true }).click()
   await page.getByRole('button', { name: 'bookstore', exact: true }).click()
   await page.getByLabel('What have they told you they enjoy?').fill('They like jazz, sushi, bookstores, and quiet places.')
   await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Generate options' }).click()
 }
 
-test('landing acknowledgement is accessible, remembers the session, and preserves the destination', async ({ page }) => {
+test('example previews value before acknowledgement and protected actions preserve the destination', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Portland controlled alpha').first()).toBeVisible()
   await expect(page.locator('.welcome-hero-preview')).toHaveCount(0)
   await expect(page.getByText('No account or GPS')).toHaveCount(0)
 
-  const buildButton = page.getByRole('button', { name: 'Build my date plan' })
-  const previewButton = page.getByRole('button', { name: 'See a Portland example' })
+  const buildButton = page.getByRole('button', { name: 'Build my plan' })
+  const previewButton = page.getByRole('button', { name: 'Preview an example' })
   const buildBox = await buildButton.boundingBox()
   const previewBox = await previewButton.boundingBox()
   expect(buildBox).not.toBeNull()
@@ -55,33 +52,29 @@ test('landing acknowledgement is accessible, remembers the session, and preserve
   expect(Math.abs((buildBox?.height ?? 0) - (previewBox?.height ?? 0))).toBeLessThan(2)
 
   await buildButton.click()
-  const dialog = page.getByRole('dialog', { name: 'Before you continue' })
-  await expect(dialog).toBeVisible()
-  await expect(page.locator('.welcome-panel')).toHaveAttribute('aria-hidden', 'true')
-  await expect(dialog.getByRole('button', { name: 'Continue' })).toBeDisabled()
-  await expect(dialog.getByText('never a private street address')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(dialog).toBeHidden()
-  await expect(buildButton).toBeFocused()
-
-  await previewButton.click()
-  await dialog.getByRole('checkbox').check()
-  await dialog.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByText('Demo profile')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Before you continue' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Where and when?' })).toBeVisible()
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Build my date plan' }).click()
-  await expect(page.getByRole('dialog', { name: 'Before you continue' })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Where should the date happen?' })).toBeVisible()
-  await expect(page.getByText('Demo profile')).toHaveCount(0)
+  await previewButton.click()
+  await expect(page.getByText('Demo profile')).toBeVisible()
+  await expect(page.getByRole('heading', { name: "Here's the strongest match for your request." })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'LumaDate navigation' })).toHaveCount(0)
+
+  await page.locator('article.result-card').first().getByRole('button', { name: 'Choose this plan' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Before you continue' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Continue' })).toBeDisabled()
+  await expect(dialog.getByText('never a private street address')).toBeVisible()
+  await dialog.getByRole('checkbox').check()
+  await dialog.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.locator('.itinerary')).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'LumaDate navigation' })).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
 test('duration uses one stepped slider and every budget is total for the date', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Build my date plan')
-  await page.getByRole('button', { name: 'Next' }).click()
-  await expect(page.getByRole('heading', { name: 'When and how flexible?' })).toBeFocused()
+  await acknowledgeAndEnter(page, 'Build my plan')
 
   const duration = page.getByRole('slider', { name: 'Date duration' })
   await expect(duration).toHaveCount(1)
@@ -92,15 +85,13 @@ test('duration uses one stepped slider and every budget is total for the date', 
   await expect(duration).toHaveAttribute('aria-valuetext', '90 minutes')
 
   await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await expect(page.getByRole('heading', { name: 'Food, drinks, and limits.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Vibe and budget.' })).toBeFocused()
   await expect(page.getByRole('radiogroup', { name: 'Budget basis' })).toHaveCount(0)
   await expect(page.getByText('Whole date', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Per person', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: /Custom max/ }).click()
   await expect(page.getByText(/total for the date/).first()).toBeVisible()
 
-  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page.getByRole('heading', { name: 'Review the plan brief.' })).toBeVisible()
@@ -110,19 +101,22 @@ test('duration uses one stepped slider and every budget is total for the date', 
 })
 
 test('ranked results contain exactly three independently actionable plans', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'See a Portland example')
+  await acknowledgeAndEnter(page, 'Preview an example')
 
   const cards = page.locator('article.result-card')
   await expect(cards).toHaveCount(3)
-  await expect(page.getByRole('button', { name: 'Open plan', exact: true })).toHaveCount(3)
-  await expect(page.getByRole('button', { name: 'Save for later', exact: true })).toHaveCount(3)
-  await expect(cards.getByRole('button', { name: 'Adjust', exact: true })).toHaveCount(3)
+  await expect(page.getByRole('button', { name: 'Choose this plan', exact: true })).toHaveCount(3)
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(3)
+  await expect(page.getByText('View details', { exact: true })).toHaveCount(3)
+  await expect(page.getByRole('heading', { name: 'Best matches for your request' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Explore nearby alternatives' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'LumaDate navigation' })).toHaveCount(0)
   await expect(page.getByText('Curated Portland venue pool')).toHaveCount(0)
   await expect(cards.nth(1)).toContainText('Barista Pearl District')
   await expect(cards.nth(2)).toContainText('Helium Comedy Club Portland')
 
   const secondTitle = await cards.nth(1).getByRole('heading').innerText()
-  await cards.nth(1).getByRole('button', { name: 'Save for later' }).click()
+  await cards.nth(1).getByRole('button', { name: 'Save' }).click()
   await expect(page.getByRole('button', { name: 'Saved (1)' })).toBeVisible()
   await page.getByRole('button', { name: 'Saved (1)' }).click()
   const savedDialog = page.getByRole('dialog', { name: 'Saved plans' })
@@ -130,7 +124,7 @@ test('ranked results contain exactly three independently actionable plans', asyn
   await expect(savedDialog.locator('.saved-card')).toHaveCount(1)
   await savedDialog.getByRole('button', { name: 'Close' }).click()
 
-  await cards.first().getByRole('button', { name: 'Open plan' }).click()
+  await cards.first().getByRole('button', { name: 'Choose this plan' }).click()
   await expect(page.locator('.itinerary')).toBeVisible()
   await expect(page.locator('.itinerary').getByRole('button', { name: /save/i })).toHaveCount(0)
   await expect(page.locator('.itinerary').getByRole('heading', { name: 'Curated Portland venue pool' })).toHaveCount(0)
@@ -140,10 +134,10 @@ test('ranked results contain exactly three independently actionable plans', asyn
 })
 
 test('venue changes live under Adjust and update an already-saved plan', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'See a Portland example')
+  await acknowledgeAndEnter(page, 'Preview an example')
   const firstCard = page.locator('article.result-card').first()
-  await firstCard.getByRole('button', { name: 'Save for later' }).click()
-  await firstCard.getByRole('button', { name: 'Open plan' }).click()
+  await firstCard.getByRole('button', { name: 'Save' }).click()
+  await firstCard.getByRole('button', { name: 'Choose this plan' }).click()
 
   await page.getByRole('button', { name: 'Adjust plan' }).click()
   await page.getByRole('button', { name: 'Review or change venue' }).click()
@@ -178,7 +172,7 @@ test('synchronizing a stale saved title keeps the saved card and opened itinerar
       savedAt: '2026-07-20T00:00:00.000Z',
     }]))
   })
-  await acknowledgeAndEnter(page, 'See a Portland example')
+  await acknowledgeAndEnter(page, 'Preview an example')
 
   await expect(page.locator('article.result-card[data-plan-id="jazz-sushi-bookstore-evening"]')).toHaveCount(0)
   await page.getByRole('button', { name: 'Saved (1)' }).click()
@@ -197,8 +191,8 @@ test('synchronizing a stale saved title keeps the saved card and opened itinerar
 })
 
 test('safety share still uses public itinerary stops and no private origin', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'See a Portland example')
-  await page.locator('article.result-card').first().getByRole('button', { name: 'Open plan' }).click()
+  await acknowledgeAndEnter(page, 'Preview an example')
+  await page.locator('article.result-card').first().getByRole('button', { name: 'Choose this plan' }).click()
   await page.getByRole('button', { name: 'Safety share' }).click()
 
   const safetyText = page.getByRole('dialog', { name: 'Safety share' }).getByRole('textbox')
@@ -211,11 +205,11 @@ test('safety share still uses public itinerary stops and no private origin', asy
 })
 
 test('the selected plan keeps one venue schedule across itinerary, invite, safety, and Maps', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'See a Portland example')
+  await acknowledgeAndEnter(page, 'Preview an example')
   const firstCard = page.locator('article.result-card').first()
   await expect(firstCard).toContainText('SE Portland public meet point')
   await expect(firstCard).toContainText('$70-$110 example total')
-  await firstCard.getByRole('button', { name: 'Open plan' }).click()
+  await firstCard.getByRole('button', { name: 'Choose this plan' }).click()
 
   const timelinePlaces = (await page.locator('.timeline-place').allTextContents())
     .map((value) => value.split(' · ')[0].trim())
@@ -268,7 +262,7 @@ for (const mode of ['automatic', 'mock-preview'] as const) {
       await expect(card).toHaveAttribute('data-ai-venue-id', '')
     }
 
-    await card.getByRole('button', { name: 'Save for later' }).click()
+    await card.getByRole('button', { name: 'Save' }).click()
     const savedRecord = await page.evaluate((expectedPlanId) => {
       const records = JSON.parse(localStorage.getItem('lumadate-saved') ?? '[]') as Array<Record<string, unknown>>
       return records.find((record) => record.planId === expectedPlanId)
@@ -315,36 +309,34 @@ for (const mode of ['automatic', 'mock-preview'] as const) {
 }
 
 test('guided generation remains deterministic unless the internal mock preview is enabled', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Build my date plan')
+  await acknowledgeAndEnter(page, 'Build my plan')
 
-  for (let step = 0; step < 6; step += 1) {
+  for (let step = 0; step < 3; step += 1) {
     await page.getByRole('button', { name: 'Next' }).click()
   }
   await page.getByRole('button', { name: 'Generate options' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Best matches for your request' })).toBeVisible()
   await expect(page.getByLabel('AI composition summary')).toHaveCount(0)
   await expect(page.getByText('AI foundation preview — safe mock, no hosted model connected', { exact: true })).toHaveCount(0)
 })
 
 test('internal mock may select a lower-ranked eligible plan while every downstream identity stays canonical', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await acknowledgeAndEnter(page, 'Build my date plan', '/?aiPreview=mock')
+  await acknowledgeAndEnter(page, 'Build my plan', '/?aiPreview=mock')
 
   await page.getByLabel('Planning area').selectOption('NW Portland')
-  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('radio', { name: 'Established couple' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Custom max' }).click()
   await page.getByLabel(/Plan around: up to/).fill('250')
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByText('Safety and sharing options', { exact: true }).click()
   await page.getByRole('button', { name: /First-date safe mode/ }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Generate options' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Three ways the date could go.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Best matches for your request' })).toBeVisible()
   const aiSummary = page.getByLabel('AI composition summary')
   await expect(aiSummary.getByText('AI foundation preview — safe mock, no hosted model connected', { exact: true })).toBeVisible()
   await expect(aiSummary).toContainText('controls every plan, venue, and visible explanation')
@@ -355,7 +347,7 @@ test('internal mock may select a lower-ranked eligible plan while every downstre
   expect(primaryPlanId).toBeTruthy()
   expect(primaryPlanId).not.toBe(deterministicFirstPlanId)
 
-  const selectedCard = page.locator('article.result-card.selected')
+  const selectedCard = page.locator('article.result-card.ai-preview-pick')
   await expect(selectedCard.locator('.score')).toContainText('#2')
   await expect(selectedCard).toHaveAttribute('data-plan-id', primaryPlanId!)
   const aiVenueId = await selectedCard.getAttribute('data-ai-venue-id')
@@ -365,8 +357,8 @@ test('internal mock may select a lower-ranked eligible plan while every downstre
   const planTitle = await selectedCard.getByRole('heading').innerText()
   const venueName = await selectedCard.locator('.result-meta > div').filter({ hasText: 'Plan anchor' }).locator('dd').innerText()
   const meetArea = await selectedCard.locator('.result-meta > div').filter({ hasText: 'Area' }).locator('dd').innerText()
-  await selectedCard.getByRole('button', { name: 'Save for later' }).click()
-  await selectedCard.getByRole('button', { name: 'Open plan' }).click()
+  await selectedCard.getByRole('button', { name: 'Save' }).click()
+  await selectedCard.getByRole('button', { name: 'Choose this plan' }).click()
 
   const itinerary = page.locator('.itinerary')
   await expect(itinerary).toHaveAttribute('data-plan-id', primaryPlanId!)
@@ -422,29 +414,27 @@ test('internal mock may select a lower-ranked eligible plan while every downstre
 })
 
 test('internal mock preview discloses deterministic fallback when no AI candidate is eligible', async ({ page }) => {
-  await acknowledgeAndEnter(page, 'Build my date plan', '/?aiPreview=mock')
+  await acknowledgeAndEnter(page, 'Build my plan', '/?aiPreview=mock')
 
-  for (let step = 0; step < 3; step += 1) {
-    await page.getByRole('button', { name: 'Next' }).click()
-  }
+  await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: /Custom max/ }).click()
   await page.locator('.custom-budget-control input[type="range"]').press('Home')
-  for (let step = 0; step < 3; step += 1) {
+  for (let step = 0; step < 2; step += 1) {
     await page.getByRole('button', { name: 'Next' }).click()
   }
   await page.getByRole('button', { name: 'Generate options' }).click()
 
-  const aiSummary = page.getByLabel('AI composition summary')
-  await expect(aiSummary.getByText('AI preview unavailable — no AI selection applied', { exact: true })).toBeVisible()
   await expect(page.locator('.toast-region')).toContainText('AI preview unavailable - deterministic plans kept.')
   await expect(page.locator('.toast-region')).not.toContainText('Safe mock composition generated')
+  const aiSummary = page.getByLabel('AI composition summary')
+  await expect(aiSummary.getByText('AI preview unavailable — no AI selection applied', { exact: true })).toBeVisible()
 })
 
 test('changing eligibility after mock composition clears stale AI selections', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 })
-  await acknowledgeAndEnter(page, 'Build my date plan', '/?aiPreview=mock')
+  await acknowledgeAndEnter(page, 'Build my plan', '/?aiPreview=mock')
 
-  for (let step = 0; step < 6; step += 1) {
+  for (let step = 0; step < 3; step += 1) {
     await page.getByRole('button', { name: 'Next' }).click()
   }
   await page.getByRole('button', { name: 'Generate options' }).click()
@@ -467,7 +457,8 @@ test('Help me leave separates calm exits, trusted-contact urgency, and emergency
       },
     })
   })
-  await acknowledgeAndEnter(page, 'See a Portland example')
+  await acknowledgeAndEnter(page, 'Preview an example')
+  await page.locator('article.result-card').first().getByRole('button', { name: 'Choose this plan' }).click()
   await page.getByRole('button', { name: 'Alerts', exact: true }).click()
   await page.getByRole('button', { name: 'Help me leave', exact: true }).click()
 
@@ -491,5 +482,47 @@ test('Help me leave separates calm exits, trusted-contact urgency, and emergency
   await dialog.getByRole('radio', { name: 'I need help leaving' }).click()
   await expect(messagePreview).toHaveValue(/public meet point/)
   await expect(dialog.getByLabel('Emergency help')).toContainText('Immediate danger is different.')
+  await expectNoHorizontalOverflow(page)
+})
+
+test('Concierge withholds private details and requires approval before changing the canonical plan', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await generatePearlJazzPlan(page, '/')
+
+  const originalPlanId = 'coffee-art-low-pressure'
+  const originalCard = page.locator(`article.result-card[data-plan-id="${originalPlanId}"]`)
+  await originalCard.getByRole('button', { name: 'Choose this plan' }).click()
+  await page.getByRole('button', { name: 'Adjust plan' }).click()
+
+  const adjustSurface = page.locator('.surface[data-active-plan-id]')
+  await expect(adjustSurface).toHaveAttribute('data-active-plan-id', originalPlanId)
+  await expect(page.getByText('Local mock. No hosted AI or messages.')).toBeVisible()
+
+  const request = page.getByLabel('What should change?')
+  await request.fill('Meet me at 123 Private Street')
+  await page.getByRole('button', { name: 'Send' }).click()
+  const transcript = page.getByRole('log')
+  await expect(transcript).toContainText('Private details withheld.')
+  await expect(transcript).not.toContainText('123 Private Street')
+
+  await request.fill('Make it more romantic')
+  await page.getByRole('button', { name: 'Send' }).click()
+  const proposal = page.getByLabel('Proposed itinerary change')
+  await expect(proposal).toBeVisible()
+  const proposedPlan = proposal.locator('.concierge-plan.after')
+  const proposedPlanId = await proposedPlan.getAttribute('data-plan-id')
+  const proposedVenueId = await proposedPlan.getAttribute('data-venue-id')
+  expect(proposedPlanId).toBeTruthy()
+  expect(proposedPlanId).not.toBe(originalPlanId)
+  expect(proposedVenueId).toBeTruthy()
+
+  await expect(adjustSurface).toHaveAttribute('data-active-plan-id', originalPlanId)
+  await proposal.getByRole('button', { name: 'Apply change' }).click()
+  await expect(adjustSurface).toHaveAttribute('data-active-plan-id', proposedPlanId!)
+  await expect(page.locator('.mock-update')).toContainText('Concierge applied')
+
+  await page.getByRole('button', { name: 'Open adjusted itinerary' }).click()
+  await expect(page.locator('.itinerary')).toHaveAttribute('data-plan-id', proposedPlanId!)
+  await expect(page.locator('.itinerary')).toHaveAttribute('data-venue-id', proposedVenueId!)
   await expectNoHorizontalOverflow(page)
 })

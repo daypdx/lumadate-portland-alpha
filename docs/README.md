@@ -14,6 +14,9 @@ This directory is the durable project record for the Portland controlled alpha. 
 - [Portland curated venue seed](data/PORTLAND_VENUE_SEED.md) — researched restaurant/café inventory, provenance rules, app behavior, and refresh policy.
 - [Provider-neutral AI itinerary foundation](ai/PROVIDER_NEUTRAL_AI_FOUNDATION.md) — safe mock composer, privacy boundary, output validation, deterministic fallback, and hosted-provider handoff rules.
 
+- [Mock Concierge adjustments](ai/MOCK_CONCIERGE_ADJUSTMENTS.md) - local request interpreter, approved-candidate boundary, preview, and explicit approval flow.
+- [2026-07-21 Variant B UX implementation](testing/reports/2026-07-21-variant-b-ux-implementation.md) - four-stage intake, delayed acknowledgement, honest result hierarchy, and responsive verification target.
+
 ## Product definition
 
 LumaDate is an intake-based date itinerary planner. It is not a dating, swiping, or matching service.

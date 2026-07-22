@@ -9,6 +9,7 @@ import {
   aiCompositionToast,
   aiCompositionApplicationDecision,
   calmExitMessages,
+  conciergePlanCandidatesFor,
   createAiGenerationCoordinator,
   createDefaultIntake,
   createExampleIntake,
@@ -25,6 +26,8 @@ import {
   rankPlans,
   runCurrentAiGeneration,
   safetyText,
+  summarizeDatePlan,
+  summarizeInterests,
   syncSavedItinerariesAfterAiInvalidation,
   syncSavedItinerariesAfterIntakeReplacement,
   syncSavedItinerariesWithVenueSelections,
@@ -60,6 +63,41 @@ describe('Portland alpha planning safeguards', () => {
       },
     }
   }
+
+  it('summarizes the brief without treating sentence verbs as interests', () => {
+    const intake = {
+      ...createDefaultIntake(new Date(2026, 6, 17, 12, 0)),
+      dateArea: 'SE Portland',
+      dateEnjoysText: 'They love coffee, bookstores, quiet jazz, and walks.',
+    }
+
+    expect(summarizeDatePlan(intake)).toBe('First date in SE Portland · 2-3 hours · up to $120 total')
+    expect(summarizeInterests(intake)).toBe('coffee, bookstores, quiet, jazz, and walks.')
+    expect(summarizeInterests(intake)).not.toContain('love')
+  })
+
+  it('keeps Concierge proposals behind the approved same-area venue gate', () => {
+    const { intake } = pearlJazzScenario()
+    const ranked = rankPlans(intake)
+    const coffeeEligibility = aiCandidateInputsFor(intake, ranked)
+      .find(({ planId }) => planId === 'coffee-art-low-pressure')
+    const candidates = conciergePlanCandidatesFor(intake, ranked)
+
+    expect(coffeeEligibility).toMatchObject({
+      areaMatch: true,
+      budgetFits: true,
+      safetyEligible: true,
+      venueOptions: [],
+    })
+    expect(candidates.find(({ planId }) => planId === 'coffee-art-low-pressure')).toMatchObject({
+      eligible: false,
+      estimatedCostHigh: 60,
+    })
+    expect(candidates.find(({ planId }) => planId === 'jazz-sushi-bookstore-evening')).toMatchObject({
+      eligible: true,
+      isRomantic: true,
+    })
+  })
 
   it('creates a current date window instead of a hardcoded launch date', () => {
     const now = new Date(2026, 6, 17, 15, 0)

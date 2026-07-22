@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import plansJson from './data/datePlans.json'
 import { recommendablePortlandVenues, type CuratedVenue, type CuratedVenueKind } from './data/portlandVenues'
 import lumaDateEmblem from './assets/lumadate-emblem.png'
@@ -19,6 +19,13 @@ import {
   type AiItineraryComposition,
   type AiReasonCode,
 } from './ai/itineraryComposer'
+import {
+  conciergeSuggestions,
+  interpretConciergeMessage,
+  selectConciergeCandidate,
+  type ConciergePlanCandidate,
+  type ConciergeRequest,
+} from './concierge/planConcierge'
 import './App.css'
 
 type MeetingMode = 'near_me' | 'near_them' | 'fair_midpoint' | 'neutral_public'
@@ -448,8 +455,14 @@ const stopWords = new Set([
   'good',
   'great',
   'have',
+  'enjoy',
+  'enjoyed',
+  'enjoys',
   'like',
   'likes',
+  'love',
+  'loved',
+  'loves',
   'long',
   'place',
   'places',
@@ -690,27 +703,22 @@ function providerModeLabel(mode: ProviderMode): string {
   return 'Demo reservation only'
 }
 
-function summarizeDatePlan(intake: Intake): string {
+export function summarizeDatePlan(intake: Intake): string {
   const area = intake.dateArea || intake.startLocation
-  const interests = extractKeywords(`${intake.dateEnjoysText} ${intake.userEnjoysText}`).slice(0, 4)
-  const interestText = interests.length ? ` with ${interests.join(', ')} interests` : ''
-  return `You're planning a ${durationSummary(intake)} ${dateStageLabels[intake.dateStage].toLowerCase()} near ${area}, ${alcoholLabels[intake.alcoholPreference]}, with up to ${formatMoney(intake.budgetMax)} total${interestText}.`
+  return `${dateStageLabels[intake.dateStage]} in ${area} · ${durationSummary(intake)} · up to ${formatMoney(intake.budgetMax)} total`
+}
+
+export function summarizeInterests(intake: Intake): string {
+  const interests = extractKeywords(`${intake.dateEnjoysText} ${intake.userEnjoysText}`).slice(0, 6)
+  if (!interests.length) return 'Use the selected vibe and Portland defaults.'
+  if (interests.length === 1) return `${interests[0]}.`
+  if (interests.length === 2) return `${interests[0]} and ${interests[1]}.`
+  return `${interests.slice(0, -1).join(', ')}, and ${interests.at(-1)}.`
 }
 
 function budgetSummary(intake: Intake): string {
   const preset = budgetOptions.find((option) => option.value === intake.budgetMax)
   return `${preset?.label ?? 'Custom max'}: up to ${formatMoney(intake.budgetMax)} total for the date. Private planning guide only.`
-}
-
-function fitLabel(ranked: RankedPlan, index: number): string {
-  if (index === 0 && ranked.areaMatch && ranked.budgetFits) return 'Best fit'
-  if (index === 0) return 'Closest available'
-  if (!ranked.areaMatch) return 'Different-area alternative'
-  if (!ranked.budgetFits) return 'Over-budget alternative'
-  if (ranked.plan.estimatedCostTotal <= 75) return 'Budget-friendly backup'
-  if (ranked.plan.tags.some((tag) => /quiet|coffee|walk|park/i.test(tag))) return 'Low-key backup'
-  if (ranked.plan.tags.some((tag) => /comedy|music|social/i.test(tag))) return 'Social option'
-  return 'Alternate plan'
 }
 
 function offsetTime(start: string, offsetMinutes: number): string {
@@ -1200,14 +1208,50 @@ export async function runCurrentAiGeneration<T>(
   }
 }
 
+export function conciergePlanCandidatesFor(
+  intake: Intake,
+  rankedPlans: RankedPlan[],
+): ConciergePlanCandidate[] {
+  const eligibleByPlan = new Map(
+    aiCandidateInputsFor(intake, rankedPlans).map((candidate) => [candidate.planId, candidate]),
+  )
+
+  return rankedPlans.map((ranked) => {
+    const { plan } = ranked
+    const eligibility = eligibleByPlan.get(plan.id)
+    const searchable = [
+      ...plan.tags,
+      ...plan.interestKeywords,
+      ...(plan.places ?? []).flatMap((place) => [place.category, place.why]),
+    ].join(' ').toLowerCase()
+
+    return {
+      planId: plan.id,
+      title: plan.title,
+      estimatedCostHigh: ranked.estimatedCostHigh,
+      durationMinutes: plan.estimatedDurationMinutes,
+      eligible: Boolean(
+        eligibility?.areaMatch
+        && eligibility.budgetFits
+        && eligibility.safetyEligible
+        && eligibility.venueOptions.length > 0
+      ),
+      isQuiet: /quiet|conversation|low pressure|bookstore|coffee|cafe/.test(searchable),
+      isIndoor: plan.safetyProfile.indoor,
+      isRomantic: /romantic|special|jazz|garden|scenic|thoughtful/.test(searchable),
+      hasFood: /food|dinner|restaurant|sushi|coffee|cafe|dessert|mocktail|drink/.test(searchable),
+    }
+  })
+}
+
 function App() {
   const aiFeatureMode = getAiFeatureMode(window.location.search)
   const [started, setStarted] = useState(false)
   const [experienceMode, setExperienceMode] = useState<'personal' | 'demo'>('personal')
-  const [entryIntent, setEntryIntent] = useState<EntryIntent | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
+  const [acknowledgementOpen, setAcknowledgementOpen] = useState(false)
+  const [hasChosenPlan, setHasChosenPlan] = useState(false)
   const [tab, setTab] = useState<Tab>('plan')
-  const [wizardStep, setWizardStep] = useState(0)
   const [intake, setIntake] = useState<Intake>(() => normalizeIntake(parseStored(storageKeys.intake, defaultIntake)))
   const [activeId, setActiveId] = useState('portland-park-restaurant-walk')
   const [sheet, setSheet] = useState<Sheet>(null)
@@ -1223,6 +1267,7 @@ function App() {
   const [aiOwnedVenueByPlan, setAiOwnedVenueByPlan] = useState<Record<string, string>>({})
   const [aiComposition, setAiComposition] = useState<AiItineraryComposition | null>(null)
   const entryTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const pendingAcknowledgedActionRef = useRef<(() => void) | null>(null)
   const intakeRef = useRef(intake)
   const selectedVenueByPlanRef = useRef(selectedVenueByPlan)
   const aiOwnedVenueByPlanRef = useRef(aiOwnedVenueByPlan)
@@ -1242,6 +1287,19 @@ function App() {
   const venueSuggestions = venueSuggestionsByPlan[active.plan.id] ?? []
   const selectedVenueMatch = venueSuggestions.find(({ venue }) => venue.id === selectedVenueByPlan[active.plan.id])
     ?? automaticVenueForPlan(active.plan, venueSuggestions, curatedVenueAreaForPlan(intake, active.plan))
+  const adjustVenueByPlan = useMemo(() => Object.fromEntries(
+    allRankedPlans.map((ranked) => {
+      const matches = venueSuggestionsByPlan[ranked.plan.id] ?? []
+      const selected = matches.find(({ venue }) => venue.id === selectedVenueByPlan[ranked.plan.id])
+        ?? automaticVenueForPlan(ranked.plan, matches, curatedVenueAreaForPlan(intake, ranked.plan))
+      return [ranked.plan.id, selected]
+    }),
+  ) as Record<string, CuratedVenueMatch | undefined>, [
+    allRankedPlans,
+    intake,
+    selectedVenueByPlan,
+    venueSuggestionsByPlan,
+  ])
 
   useEffect(() => {
     localStorage.setItem(storageKeys.intake, JSON.stringify(intakeForStorage(intake)))
@@ -1401,6 +1459,7 @@ function App() {
   }
 
   async function showItinerary() {
+    setHasChosenPlan(false)
     if (aiFeatureMode === 'deterministic') {
       invalidateAiComposition(intakeRef.current)
       setTab('options')
@@ -1444,18 +1503,13 @@ function App() {
 
   function openPlan(ranked = active) {
     setActiveId(ranked.plan.id)
+    setHasChosenPlan(true)
     setTab('itinerary')
     showToast('Itinerary opened.')
     window.setTimeout(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' })
       document.querySelector<HTMLElement>('.itinerary')?.focus()
     }, 0)
-  }
-
-  function adjustPlan(ranked = active) {
-    setActiveId(ranked.plan.id)
-    setTab('adjust')
-    window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
   }
 
   function selectVenue(venueId: string) {
@@ -1487,18 +1541,15 @@ function App() {
     showToast(`Venue changed to ${match.venue.name}`)
   }
 
-  function requestEntry(intent: EntryIntent, trigger: HTMLButtonElement) {
-    entryTriggerRef.current = trigger
-    if (sessionStorage.getItem(acknowledgementKey) === 'true') {
-      beginEntry(intent)
+  function requestEntry(intent: EntryIntent) {
+    if (intent === 'demo') {
+      startDemo()
       return
     }
-    setAcknowledged(false)
-    setEntryIntent(intent)
+    beginEntry(intent)
   }
 
   function beginEntry(intent: EntryIntent) {
-    setEntryIntent(null)
     if (intent === 'demo') {
       startDemo()
       return
@@ -1507,16 +1558,31 @@ function App() {
     setSheet(null)
     replaceIntake(nextIntake)
     setExperienceMode('personal')
+    setHasChosenPlan(false)
     setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('plan')
     showToast('Planning flow opened.')
   }
 
-  function continueEntry() {
-    if (!entryIntent || !acknowledged) return
+  function requireAcknowledgement(action: () => void, trigger?: HTMLButtonElement) {
+    if (sessionStorage.getItem(acknowledgementKey) === 'true') {
+      action()
+      return
+    }
+    entryTriggerRef.current = trigger ?? null
+    pendingAcknowledgedActionRef.current = action
+    setAcknowledged(false)
+    setAcknowledgementOpen(true)
+  }
+
+  function continueAcknowledgedAction() {
+    if (!acknowledged) return
     sessionStorage.setItem(acknowledgementKey, 'true')
-    beginEntry(entryIntent)
+    const action = pendingAcknowledgedActionRef.current
+    pendingAcknowledgedActionRef.current = null
+    setAcknowledgementOpen(false)
+    action?.()
   }
 
   function startDemo() {
@@ -1524,6 +1590,7 @@ function App() {
     setSheet(null)
     replaceIntake(nextIntake)
     setExperienceMode('demo')
+    setHasChosenPlan(false)
     setActiveId(rankPlans(nextIntake)[0]?.plan.id ?? 'portland-park-restaurant-walk')
     setStarted(true)
     setTab('options')
@@ -1558,27 +1625,19 @@ function App() {
             </span>
             <span>LumaDate</span>
           </div>
-          <h1>A Portland date plan you can actually use tonight.</h1>
-          <p>Choose the vibe, neighborhood, and budget. Get three public, privacy-aware itineraries with real place links, then verify and send the one you like.</p>
+          <p className="landing-promise">A Portland date plan you can actually use tonight.</p>
+          <h1>Plan a great Portland date in minutes.</h1>
+          <p>Tell us the area, vibe, and budget. We'll build three practical plans with real places, a public meet point, and an easy backup.</p>
           <div className="welcome-actions">
-            <button type="button" className="primary" onClick={(event) => requestEntry('personal', event.currentTarget)}>
-              Build my date plan
+            <button type="button" className="primary" onClick={() => requestEntry('personal')}>
+              Build my plan
             </button>
-            <button type="button" className="secondary" onClick={(event) => requestEntry('demo', event.currentTarget)}>
-              See a Portland example
+            <button type="button" className="secondary" onClick={() => requestEntry('demo')}>
+              Preview an example
             </button>
           </div>
           <AlphaFooter compact />
         </section>
-        {entryIntent && (
-          <AlphaAcknowledgementDialog
-            checked={acknowledged}
-            onChecked={setAcknowledged}
-            onContinue={continueEntry}
-            onClose={() => setEntryIntent(null)}
-            returnFocus={entryTriggerRef.current}
-          />
-        )}
       </main>
     )
   }
@@ -1608,7 +1667,7 @@ function App() {
         </div>
       )}
 
-      <section className="main-grid">
+      <section className={tab === 'plan' || tab === 'options' ? 'main-grid plan-only' : 'main-grid'}>
         <div className="planner-column">
           {tab === 'plan' && (
             <IntakeWizard
@@ -1618,8 +1677,7 @@ function App() {
               onToggleActivity={toggleActivity}
               onToggleMood={toggleMood}
               onToggleAvoid={toggleAvoid}
-              onGenerate={showItinerary}
-              onStepChange={setWizardStep}
+              onGenerate={(trigger) => requireAcknowledgement(() => void showItinerary(), trigger)}
             />
           )}
 
@@ -1628,13 +1686,12 @@ function App() {
               rankedPlans={rankedPlans}
               intake={intake}
               aiComposition={aiComposition}
-              activeId={active.plan.id}
+              chosenPlanId={hasChosenPlan ? active.plan.id : null}
               venuesByPlan={venueSuggestionsByPlan}
               selectedVenueByPlan={selectedVenueByPlan}
               saved={saved}
-              onOpen={openPlan}
-              onSave={savePlan}
-              onAdjust={adjustPlan}
+              onChoose={(ranked, trigger) => requireAcknowledgement(() => openPlan(ranked), trigger)}
+              onSave={(ranked, trigger) => requireAcknowledgement(() => savePlan(ranked), trigger)}
             />
           )}
 
@@ -1662,7 +1719,9 @@ function App() {
           {tab === 'adjust' && (
             <AdjustPanel
               ranked={active}
-              rankedPlans={rankedPlans}
+              rankedPlans={allRankedPlans}
+              intake={intake}
+              venuesByPlan={adjustVenueByPlan}
               message={adjustmentMessage}
               onAdjust={setAdjustmentMessage}
               onSelect={setActiveId}
@@ -1702,20 +1761,16 @@ function App() {
           )}
         </div>
 
-        <aside className="context-column">
-          {tab === 'plan' ? (
-            <GuidanceCard step={wizardStep} intake={intake} />
-          ) : (
-            <>
-              <PrivacyCard intake={intake} ranked={active} selectedVenue={selectedVenueMatch} />
-              {(tab === 'options' || tab === 'alerts') && <ForecastCard ranked={active} intake={intake} />}
-            </>
-          )}
-          <SettingsCard intake={intake} onChange={updateIntake} onClear={clearDemoData} />
-        </aside>
+        {tab !== 'plan' && (
+          <aside className={`context-column${tab === 'options' ? ' results-settings-only' : ''}`}>
+            {tab !== 'options' && <PrivacyCard intake={intake} ranked={active} selectedVenue={selectedVenueMatch} />}
+            {tab === 'alerts' && <ForecastCard ranked={active} intake={intake} />}
+            <SettingsCard intake={intake} onChange={updateIntake} onClear={clearDemoData} />
+          </aside>
+        )}
       </section>
 
-      {!sheet && tab !== 'plan' && (
+      {!sheet && hasChosenPlan && tab !== 'plan' && (
         <nav className="bottom-nav" aria-label="LumaDate navigation">
           {[
             ['itinerary', 'Itinerary'],
@@ -1782,6 +1837,7 @@ function App() {
               commitAiVenueSelectionState({ selectedVenueByPlan, ownedByAi })
             }
             setTab('itinerary')
+            setHasChosenPlan(true)
             setSheet(null)
           }}
           onRemove={(id) => setSaved((current) => current.filter((item) => item.id !== id))}
@@ -1800,6 +1856,18 @@ function App() {
           copied={copied}
           onCopy={copyText}
           onClose={() => setSheet(null)}
+        />
+      )}
+      {acknowledgementOpen && (
+        <AlphaAcknowledgementDialog
+          checked={acknowledged}
+          onChecked={setAcknowledged}
+          onContinue={continueAcknowledgedAction}
+          onClose={() => {
+            pendingAcknowledgedActionRef.current = null
+            setAcknowledgementOpen(false)
+          }}
+          returnFocus={entryTriggerRef.current}
         />
       )}
       <AlphaFooter />
@@ -1947,7 +2015,6 @@ function IntakeWizard({
   onToggleMood,
   onToggleAvoid,
   onGenerate,
-  onStepChange,
 }: {
   intake: Intake
   onChange: <K extends keyof Intake>(key: K, value: Intake[K]) => void
@@ -1955,8 +2022,7 @@ function IntakeWizard({
   onToggleActivity: (value: string) => void
   onToggleMood: (value: string) => void
   onToggleAvoid: (value: string) => void
-  onGenerate: () => void
-  onStepChange: (step: number) => void
+  onGenerate: (trigger: HTMLButtonElement) => void
 }) {
   const [step, setStep] = useState(0)
   const [isBuilding, setIsBuilding] = useState(false)
@@ -1967,7 +2033,7 @@ function IntakeWizard({
   const [selectedDatePreset, setSelectedDatePreset] = useState<string | null>(() => inferDatePreset(intake.dateStart))
   const stepHeadingRef = useRef<HTMLHeadingElement>(null)
   const previousStepRef = useRef(step)
-  const steps = ['Where', 'Time', 'Energy', 'Food', 'Likes', 'Safety', 'Review']
+  const steps = ['Where + time', 'Vibe + budget', 'Personal clue', 'Review']
   const isLastStep = step === steps.length - 1
   const selectedAvoids = intake.mustAvoid
     .split(',')
@@ -1976,24 +2042,19 @@ function IntakeWizard({
   const durationIndex = Math.max(0, durationOptions.findIndex((option) => option.mode === intake.endMode))
 
   useEffect(() => {
-    onStepChange(step)
     if (previousStepRef.current !== step) {
       previousStepRef.current = step
       window.requestAnimationFrame(() => stepHeadingRef.current?.focus())
     }
-  }, [onStepChange, step])
+  }, [step])
 
   function nextStep() {
-    if (isLastStep) {
-      onGenerate()
-      return
-    }
     if (step === 0 && looksLikeStreetAddress(intake.startLocation)) {
       onChange('startLocation', 'Portland, OR')
       setLocationNotice('For privacy, use a city or neighborhood only. We replaced the street address with Portland, OR.')
       return
     }
-    if (step === 1 && !intake.dateStart) applyDatePreset(0)
+    if (step === 0 && !intake.dateStart) applyDatePreset(0)
     setStep((current) => Math.min(current + 1, steps.length - 1))
     window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0)
   }
@@ -2010,9 +2071,10 @@ function IntakeWizard({
     onChange('dateEnjoysText', current ? `${current}, ${clue}` : clue)
   }
 
-  function buildPlan() {
+  function buildPlan(event: ReactMouseEvent<HTMLButtonElement>) {
+    const trigger = event.currentTarget
     setIsBuilding(true)
-    window.setTimeout(onGenerate, 700)
+    window.setTimeout(() => onGenerate(trigger), 700)
   }
 
   function applyDatePreset(preset: DatePresetValue) {
@@ -2063,10 +2125,13 @@ function IntakeWizard({
       </span>
 
       <WizardProgress labels={steps} activeStep={step} onEdit={setStep} nextTitle={wizardTitles[step + 1]} />
-      <InlineGuidance step={step} intake={intake} />
 
       {step === 0 && (
         <div className="wizard-step">
+          <div className="step-section-heading">
+            <span className="eyebrow">Where</span>
+            <h3>Choose a public planning area.</h3>
+          </div>
           <div className="form-grid">
             <label>
               Starting area
@@ -2094,39 +2159,46 @@ function IntakeWizard({
               </select>
             </label>
           </div>
-          <div className="choice-grid" aria-label="Meet-up style">
-            {(Object.keys(meetupStyleLabels) as MeetupStyle[]).map((style) => (
-              <button
-                type="button"
-                key={style}
-                className={intake.meetupStyle === style ? 'choice-card selected' : 'choice-card'}
-                aria-pressed={intake.meetupStyle === style}
-                onClick={() => onMeetupStyle(style)}
-            >
-              <strong>{meetupStyleLabels[style]}</strong>
-              {style === 'neutral_public' && <em className="recommended-badge">Recommended for first dates</em>}
-              <span>{meetupHelperText[style]}</span>
-            </button>
-            ))}
-          </div>
-          <div className="form-grid single-control-grid">
-            <label>
-              Transportation
-              <select value={intake.transportMode} onChange={(event) => onChange('transportMode', event.target.value)}>
-                <option value="driving">Driving</option>
-                <option value="rideshare">Rideshare</option>
-                <option value="transit">Transit</option>
-                <option value="walking">Walking</option>
-                <option value="biking">Biking</option>
-              </select>
-            </label>
-          </div>
-          <p className="privacy-note">Invites and safety shares only show public Portland places.</p>
+          <p className="privacy-status"><strong>Private origin hidden</strong> Shared plans only show public Portland places.</p>
+          <details className="advanced-section progressive-options">
+            <summary>More meet-up and travel options</summary>
+            <div className="choice-grid" aria-label="Meet-up style">
+              {(Object.keys(meetupStyleLabels) as MeetupStyle[]).map((style) => (
+                <button
+                  type="button"
+                  key={style}
+                  className={intake.meetupStyle === style ? 'choice-card selected' : 'choice-card'}
+                  aria-pressed={intake.meetupStyle === style}
+                  onClick={() => onMeetupStyle(style)}
+                >
+                  <strong>{meetupStyleLabels[style]}</strong>
+                  {style === 'neutral_public' && <em className="recommended-badge">Recommended for first dates</em>}
+                  <span>{meetupHelperText[style]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="form-grid single-control-grid">
+              <label>
+                Transportation
+                <select value={intake.transportMode} onChange={(event) => onChange('transportMode', event.target.value)}>
+                  <option value="driving">Driving</option>
+                  <option value="rideshare">Rideshare</option>
+                  <option value="transit">Transit</option>
+                  <option value="walking">Walking</option>
+                  <option value="biking">Biking</option>
+                </select>
+              </label>
+            </div>
+          </details>
         </div>
       )}
 
-      {step === 1 && (
+      {step === 0 && (
         <div className="wizard-step">
+          <div className="step-section-heading">
+            <span className="eyebrow">When</span>
+            <h3>Set a rough time and duration.</h3>
+          </div>
           <div className="segmented three-up" role="group" aria-label="Date presets">
             {datePresetOptions.map(([label, offset]) => (
               <button
@@ -2203,22 +2275,11 @@ function IntakeWizard({
         </div>
       )}
 
-      {step === 2 && (
+      {step === 1 && (
         <div className="wizard-step">
-          <p className="privacy-note">Pick what you know. You can leave the rest as recommended.</p>
-          <div className="segmented" role="radiogroup" aria-label="Indoor or outdoor">
-            {(Object.keys(indoorOutdoorLabels) as Intake['indoorOutdoor'][]).map((preference) => (
-              <button
-                type="button"
-                role="radio"
-                key={preference}
-                className={intake.indoorOutdoor === preference ? 'active' : ''}
-                aria-checked={intake.indoorOutdoor === preference}
-                onClick={() => onChange('indoorOutdoor', preference)}
-              >
-                {indoorOutdoorLabels[preference]}
-              </button>
-            ))}
+          <div className="step-section-heading">
+            <span className="eyebrow">Vibe</span>
+            <h3>What should the date feel like?</h3>
           </div>
           <div className="chip-cloud" aria-label="Mood">
             {moodOptions.map((option) => (
@@ -2230,6 +2291,22 @@ function IntakeWizard({
                 onClick={() => onToggleMood(option)}
               >
                 {option}
+              </button>
+            ))}
+          </div>
+          <details className="advanced-section progressive-options">
+            <summary>More vibe and weather options</summary>
+          <div className="segmented" role="radiogroup" aria-label="Indoor or outdoor">
+            {(Object.keys(indoorOutdoorLabels) as Intake['indoorOutdoor'][]).map((preference) => (
+              <button
+                type="button"
+                role="radio"
+                key={preference}
+                className={intake.indoorOutdoor === preference ? 'active' : ''}
+                aria-checked={intake.indoorOutdoor === preference}
+                onClick={() => onChange('indoorOutdoor', preference)}
+              >
+                {indoorOutdoorLabels[preference]}
               </button>
             ))}
           </div>
@@ -2268,11 +2345,16 @@ function IntakeWizard({
               <span className="range-labels"><span>Casual</span><span>Intentional</span></span>
             </label>
           </div>
+          </details>
         </div>
       )}
 
-      {step === 3 && (
+      {step === 1 && (
         <div className="wizard-step">
+          <div className="step-section-heading">
+            <span className="eyebrow">Budget</span>
+            <h3>Set the total-date comfort range.</h3>
+          </div>
           <div className="segmented three-up" role="radiogroup" aria-label="Food wanted">
             {(['yes', 'maybe', 'no'] as Intake['foodWanted'][]).map((value) => (
               <button
@@ -2383,7 +2465,7 @@ function IntakeWizard({
         </div>
       )}
 
-      {step === 4 && (
+      {step === 2 && (
         <div className="wizard-step likes-step">
           <div className="selected-summary">
             <strong>Selected</strong>
@@ -2392,8 +2474,8 @@ function IntakeWizard({
             </span>
           </div>
           <div className="preference-accordion" aria-label="Preference categories">
-            {preferenceGroups.map((group, index) => (
-              <details key={group.title} open={index < 2}>
+            {preferenceGroups.map((group) => (
+              <details key={group.title}>
                 <summary>{group.title}</summary>
                 <div className="chip-cloud compact-chip-cloud">
                   {group.items.map((option) => {
@@ -2446,38 +2528,8 @@ function IntakeWizard({
         </div>
       )}
 
-      {step === 5 && (
-        <div className="wizard-step">
-          <div className="choice-grid" aria-label="Safety and comfort settings">
-            <button
-              type="button"
-              className={intake.firstDateSafeMode ? 'choice-card selected safety-choice' : 'choice-card safety-choice'}
-              aria-pressed={intake.firstDateSafeMode}
-              onClick={() => onChange('firstDateSafeMode', !intake.firstDateSafeMode)}
-            >
-              <strong>{intake.firstDateSafeMode ? 'On: ' : ''}First-date safe mode</strong>
-              <span>Favor public, easy-exit, conversation-friendly places.</span>
-            </button>
-            <button
-              type="button"
-              className={intake.safetyShareEnabled ? 'choice-card selected safety-choice' : 'choice-card safety-choice'}
-              aria-pressed={intake.safetyShareEnabled}
-              onClick={() => onChange('safetyShareEnabled', !intake.safetyShareEnabled)}
-            >
-              <strong>{intake.safetyShareEnabled ? 'On: ' : ''}Create a shareable safety note</strong>
-              <span>Create copyable public plan details for a trusted contact.</span>
-            </button>
-            <div className="choice-card selected safety-choice privacy-lock" role="note">
-              <strong>Always on: Private origin hidden</strong>
-              <span>Private addresses never appear in invites or safety text.</span>
-            </div>
-          </div>
-          <p className="privacy-note">Safety share uses public meet details only. No home/work address is included.</p>
-        </div>
-      )}
-
-      {step === 6 && (
-        <ReviewGenerateStep intake={intake} onEdit={setStep} />
+      {step === 3 && (
+        <ReviewGenerateStep intake={intake} onEdit={setStep} onChange={onChange} />
       )}
 
       <div className="wizard-actions">
@@ -2493,23 +2545,17 @@ function IntakeWizard({
 }
 
 const wizardTitles = [
-  'Where should the date happen?',
-  'When and how flexible?',
-  'What kind of energy?',
-  'Food, drinks, and limits.',
+  'Where and when?',
+  'Vibe and budget.',
   'What do they like?',
-  'Safety and comfort.',
   'Review the plan brief.',
 ]
 
 const wizardCopy = [
-  'Use a general starting area, then choose the public Portland area for the date.',
-  'Set the time window. You can keep the night flexible.',
-  'Tell LumaDate if this should be low-key, thoughtful, lively, or quiet.',
-  'Help the plan avoid awkward food and drink misses.',
-  'This is the emotional core. One clue is enough to make it personal.',
-  'Keep the plan reassuring without making it heavy.',
-  'One quick check before the itinerary appears.',
+  'Choose the public area and rough timing. The defaults handle the rest.',
+  'Pick the feel and total budget. Fine-tuning is optional.',
+  'One clue is enough to make the plan personal.',
+  'Check the essentials, then see your Portland matches.',
 ]
 
 const meetupHelperText: Record<MeetupStyle, string> = {
@@ -2562,81 +2608,24 @@ function WizardProgress({
   )
 }
 
-function guidanceForStep(step: number, intake: Intake) {
-  return [
-    {
-      title: 'Use general areas.',
-      body: 'Neutral public is the safest default for first dates. Private addresses stay out of invites and safety shares.',
-      tip: intake.meetupStyle === 'neutral_public' ? 'Good default selected.' : 'Neutral public is usually easiest.',
-    },
-    {
-      title: 'A rough time is enough.',
-      body: 'Pick Tonight, Tomorrow, or This weekend first. Exact date/time is only there if you need it.',
-      tip: 'Flexible endings keep backup options open.',
-    },
-    {
-      title: 'Leave defaults if unsure.',
-      body: 'Quiet, energy, and tone help LumaDate rank options, but rough answers are totally fine.',
-      tip: 'You can tune the plan after seeing results.',
-    },
-    {
-      title: 'Budget stays private.',
-      body: 'Choose a planning range. LumaDate never shows the budget to your date.',
-      tip: `${formatMoney(intake.budgetMax)} total for the date selected.`,
-    },
-    {
-      title: 'One clue is enough.',
-      body: 'If they mentioned coffee, parks, sushi, music, quiet places, or anything small, add it here.',
-      tip: 'LumaDate looks for overlap, not perfection.',
-    },
-    {
-      title: 'Safety messages are drafts only.',
-      body: 'The safety share uses public stops and arrival times. LumaDate never sends or shares these drafts automatically.',
-      tip: intake.safetyShareEnabled ? 'Safety share is on.' : 'Safety share is optional.',
-    },
-    {
-      title: 'Quick check before results.',
-      body: 'Review the public area, time, budget guide, and safety settings. Then compare plan options.',
-      tip: 'You are not booking anything yet.',
-    },
-  ][step]
-}
-
-function InlineGuidance({ step, intake }: { step: number; intake: Intake }) {
-  const guidance = guidanceForStep(step, intake)
-
-  return (
-    <div className="wizard-coach" role="note">
-      <strong>{guidance.title}</strong>
-      <span>{guidance.tip}</span>
-    </div>
-  )
-}
-
-function GuidanceCard({ step, intake }: { step: number; intake: Intake }) {
-  const guidance = guidanceForStep(step, intake)
-
-  return (
-    <section className="side-card guidance-card">
-      <span className="eyebrow">Concierge note</span>
-      <h3>{guidance.title}</h3>
-      <p>{guidance.body}</p>
-      <small>{guidance.tip}</small>
-    </section>
-  )
-}
-
-function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step: number) => void }) {
+function ReviewGenerateStep({
+  intake,
+  onEdit,
+  onChange,
+}: {
+  intake: Intake
+  onEdit: (step: number) => void
+  onChange: <K extends keyof Intake>(key: K, value: Intake[K]) => void
+}) {
   const moodSummary = intake.moodTypes.join(', ') || 'Flexible'
   const activitySummary = intake.activityTypes.slice(0, 4).map(cleanLabel).join(', ')
   const reviewRows = [
     ['Where', 0, `${meetupStyleLabels[intake.meetupStyle]} by ${intake.transportMode} in ${intake.dateArea}.`],
-    ['Time', 1, `${dateStageLabels[intake.dateStage]} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(intake.dateStart, 0)} with ${durationSummary(intake)} planned.`],
-    ['Vibe', 2, activitySummary ? `${moodSummary} with ${activitySummary}.` : `${moodSummary}.`],
-    ['Budget', 3, budgetSummary(intake)],
-    ['Food', 3, `${intake.foodWanted === 'no' ? 'No food needed' : `Food: ${intake.cuisineLikes || 'open'}`}; ${alcoholLabels[intake.alcoholPreference]}.`],
-    ['What they enjoy', 4, intake.dateEnjoysText || 'No personal notes yet.'],
-    ['Safety', 5, `${intake.firstDateSafeMode ? 'First-date safe' : 'Flexible safety mode'}; ${intake.safetyShareEnabled ? 'safety share on' : 'safety share off'}.`],
+    ['Time', 0, `${dateStageLabels[intake.dateStage]} on ${formatPlanDate(intake.dateStart)} at ${offsetTime(intake.dateStart, 0)} with ${durationSummary(intake)} planned.`],
+    ['Vibe', 1, activitySummary ? `${moodSummary} with ${activitySummary}.` : `${moodSummary}.`],
+    ['Budget', 1, budgetSummary(intake)],
+    ['Food', 1, `${intake.foodWanted === 'no' ? 'No food needed' : `Food: ${intake.cuisineLikes || 'open'}`}; ${alcoholLabels[intake.alcoholPreference]}.`],
+    ['What they enjoy', 2, intake.dateEnjoysText || 'No personal notes yet.'],
   ] as const
 
   return (
@@ -2644,7 +2633,8 @@ function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step:
       <div className="review-summary">
         <span className="eyebrow">Plan brief</span>
         <h3>{summarizeDatePlan(intake)}</h3>
-        <p>LumaDate will weigh timing, budget, preferences, comfort, and backups before ranking plans.</p>
+        <p className="review-interests"><strong>Interests:</strong> {summarizeInterests(intake)}</p>
+        <p>LumaDate will weigh the brief, public places, and easy backups before ranking plans.</p>
       </div>
       <div className="review-grid">
         {reviewRows.map(([title, editStep, value]) => (
@@ -2659,6 +2649,30 @@ function ReviewGenerateStep({ intake, onEdit }: { intake: Intake; onEdit: (step:
           </article>
         ))}
       </div>
+      <details className="advanced-section progressive-options review-safety-options">
+        <summary>Safety and sharing options</summary>
+        <div className="choice-grid" aria-label="Safety and comfort settings">
+          <button
+            type="button"
+            className={intake.firstDateSafeMode ? 'choice-card selected safety-choice' : 'choice-card safety-choice'}
+            aria-pressed={intake.firstDateSafeMode}
+            onClick={() => onChange('firstDateSafeMode', !intake.firstDateSafeMode)}
+          >
+            <strong>{intake.firstDateSafeMode ? 'On: ' : ''}First-date safe mode</strong>
+            <span>Favor public, easy-exit, conversation-friendly places.</span>
+          </button>
+          <button
+            type="button"
+            className={intake.safetyShareEnabled ? 'choice-card selected safety-choice' : 'choice-card safety-choice'}
+            aria-pressed={intake.safetyShareEnabled}
+            onClick={() => onChange('safetyShareEnabled', !intake.safetyShareEnabled)}
+          >
+            <strong>{intake.safetyShareEnabled ? 'On: ' : ''}Create a shareable safety note</strong>
+            <span>Create copyable public plan details for a trusted contact.</span>
+          </button>
+        </div>
+        <p className="privacy-status"><strong>Private origin hidden</strong> Safety text includes public stops only.</p>
+      </details>
     </div>
   )
 }
@@ -2667,34 +2681,96 @@ function ResultsPanel({
   rankedPlans,
   intake,
   aiComposition,
-  activeId,
+  chosenPlanId,
   venuesByPlan,
   selectedVenueByPlan,
   saved,
-  onOpen,
+  onChoose,
   onSave,
-  onAdjust,
 }: {
   rankedPlans: RankedPlan[]
   intake: Intake
   aiComposition: AiItineraryComposition | null
-  activeId: string
+  chosenPlanId: string | null
   venuesByPlan: Record<string, CuratedVenueMatch[]>
   selectedVenueByPlan: Record<string, string>
   saved: SavedItinerary[]
-  onOpen: (ranked: RankedPlan) => void
-  onSave: (ranked: RankedPlan) => void
-  onAdjust: (ranked: RankedPlan) => void
+  onChoose: (ranked: RankedPlan, trigger: HTMLButtonElement) => void
+  onSave: (ranked: RankedPlan, trigger: HTMLButtonElement) => void
 }) {
   const applicationDecision = aiComposition ? aiCompositionApplicationDecision(aiComposition) : null
   const disclosure = applicationDecision?.disclosure ?? null
+  const indexedPlans = rankedPlans.map((ranked, index) => ({ ranked, index }))
+  const matchingPlans = indexedPlans.filter(({ ranked }) => ranked.areaMatch && ranked.budgetFits)
+  const alternativePlans = indexedPlans.filter(({ ranked }) => !ranked.areaMatch || !ranked.budgetFits)
+
+  function renderPlanCard(ranked: RankedPlan, originalIndex: number, alternative: boolean) {
+    const venues = venuesByPlan[ranked.plan.id] ?? []
+    const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id])
+      ?? automaticVenueForPlan(ranked.plan, venues, curatedVenueAreaForPlan(intake, ranked.plan))
+    const canonical = canonicalPlanFor(ranked, intake, venue)
+    const composedPlan = applicationDecision?.displayedPlans.find((plan) => plan.planId === ranked.plan.id)
+    const isSaved = saved.some((item) => (
+      item.planId === ranked.plan.id && (item.venueId ?? '') === (venue?.venue.id ?? '')
+    ))
+    const isChosen = chosenPlanId === ranked.plan.id
+    const isAiPreviewPick = !chosenPlanId && applicationDecision?.activePlanId === ranked.plan.id
+    const matchPosition = matchingPlans.findIndex((item) => item.ranked.plan.id === ranked.plan.id) + 1
+
+    return (
+      <article
+        key={ranked.plan.id}
+        className={`result-card${alternative ? ' alternative' : ''}${isChosen ? ' selected' : ''}${isAiPreviewPick ? ' ai-preview-pick' : ''}`}
+        data-plan-id={ranked.plan.id}
+        data-venue-id={venue?.venue.id ?? ''}
+        data-ai-venue-id={composedPlan?.venueId ?? ''}
+      >
+        <div className="result-card-heading">
+          <span className="score">{alternative ? 'Nearby alternative' : `#${matchPosition} Best match`}</span>
+          {isChosen && <span className="selected-plan-note">Chosen plan</span>}
+          {isAiPreviewPick && <span className="selected-plan-note">AI preview pick</span>}
+        </div>
+        <h3>{ranked.plan.title}</h3>
+        <p>{ranked.plan.shortPitch}</p>
+        <dl className="result-meta">
+          <div><dt>Plan anchor</dt><dd>{canonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, canonical.meetArea)}</dd></div>
+          <div><dt>Area</dt><dd>{canonical.meetArea}</dd></div>
+          <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
+          <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
+        </dl>
+        {ranked.warnings.length > 0 && (
+          <div className="result-warnings" aria-label="Plan tradeoffs">
+            {ranked.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+          </div>
+        )}
+        <div className="result-card-actions">
+          <button type="button" className="primary" onClick={(event) => onChoose(ranked, event.currentTarget)}>
+            Choose this plan
+          </button>
+          <button type="button" className="secondary" disabled={isSaved} onClick={(event) => onSave(ranked, event.currentTarget)}>
+            {isSaved ? 'Saved' : 'Save'}
+          </button>
+        </div>
+        <details className="result-details">
+          <summary>View details</summary>
+          <p className="result-reason">{composedPlan ? reasonCodesToCopy(composedPlan.reasonCodes) : ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
+          <p>{ranked.crowdBackup}</p>
+          <small>Original ranking position: {originalIndex + 1} of {rankedPlans.length}.</small>
+        </details>
+      </article>
+    )
+  }
 
   return (
     <section className="surface">
       <div className="section-heading">
-        <span className="eyebrow">Ranked plans</span>
-        <h2>Three ways the date could go.</h2>
-        <p>Open one, save it for later, or adjust it without changing the other options.</p>
+        <span className="eyebrow">Portland plan options</span>
+        <h2>{matchingPlans.length === 1 ? "Here's the strongest match for your request." : `${matchingPlans.length} strong matches for your request.`}</h2>
+        <p>
+          {alternativePlans.length > 0
+            ? `We also found ${alternativePlans.length} nearby ${alternativePlans.length === 1 ? 'alternative' : 'alternatives'} if you are flexible.`
+            : 'Every option shown fits the selected area and budget.'}
+        </p>
       </div>
       {aiComposition && disclosure && (
         <div
@@ -2709,54 +2785,29 @@ function ResultsPanel({
         </div>
       )}
       <div className="alpha-plan-ribbon">Curated Portland suggestions. Verify current hours, routes, prices, and availability.</div>
-      <div className="result-list">
-        {rankedPlans.map((ranked, index) => {
-          const venues = venuesByPlan[ranked.plan.id] ?? []
-          const venue = venues.find((match) => match.venue.id === selectedVenueByPlan[ranked.plan.id])
-            ?? automaticVenueForPlan(ranked.plan, venues, curatedVenueAreaForPlan(intake, ranked.plan))
-          const canonical = canonicalPlanFor(ranked, intake, venue)
-          const composedPlan = applicationDecision?.displayedPlans.find((plan) => plan.planId === ranked.plan.id)
-          const isSaved = saved.some((item) => (
-            item.planId === ranked.plan.id && (item.venueId ?? '') === (venue?.venue.id ?? '')
-          ))
-
-          return (
-            <article
-              key={ranked.plan.id}
-              className={activeId === ranked.plan.id ? 'result-card selected' : 'result-card'}
-              data-plan-id={ranked.plan.id}
-              data-venue-id={venue?.venue.id ?? ''}
-              data-ai-venue-id={composedPlan?.venueId ?? ''}
-            >
-              <div className="result-card-heading">
-                <span className="score">#{index + 1} {fitLabel(ranked, index)}</span>
-                {activeId === ranked.plan.id && <span className="selected-plan-note">Most recently opened</span>}
-              </div>
-              <h3>{ranked.plan.title}</h3>
-              <p>{ranked.plan.shortPitch}</p>
-              <dl className="result-meta">
-                <div><dt>Plan anchor</dt><dd>{canonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, canonical.meetArea)}</dd></div>
-                <div><dt>Area</dt><dd>{canonical.meetArea}</dd></div>
-                <div><dt>Cost</dt><dd>{formatCostRange(ranked.plan.estimatedCostTotal)}</dd></div>
-                <div><dt>Duration</dt><dd>{formatDuration(ranked.plan.estimatedDurationMinutes)}</dd></div>
-              </dl>
-              <p className="result-reason">{composedPlan ? reasonCodesToCopy(composedPlan.reasonCodes) : ranked.reasons[0] ?? 'A practical Portland option for this brief.'}</p>
-              {ranked.warnings.length > 0 && (
-                <div className="result-warnings" aria-label="Plan tradeoffs">
-                  {ranked.warnings.map((warning) => <span key={warning}>{warning}</span>)}
-                </div>
-              )}
-              <div className="result-card-actions">
-                <button type="button" className="primary" onClick={() => onOpen(ranked)}>Open plan</button>
-                <button type="button" className="secondary" disabled={isSaved} onClick={() => onSave(ranked)}>
-                  {isSaved ? 'Saved' : 'Save for later'}
-                </button>
-                <button type="button" className="ghost" onClick={() => onAdjust(ranked)}>Adjust</button>
-              </div>
-            </article>
-          )
-        })}
-      </div>
+      {matchingPlans.length > 0 && (
+        <section className="result-group" aria-labelledby="best-matches-heading">
+          <div className="result-group-heading">
+            <span className="eyebrow">Fits area and budget</span>
+            <h3 id="best-matches-heading">Best matches for your request</h3>
+          </div>
+          <div className="result-list">
+            {matchingPlans.map(({ ranked, index }) => renderPlanCard(ranked, index, false))}
+          </div>
+        </section>
+      )}
+      {alternativePlans.length > 0 && (
+        <section className="result-group alternatives" aria-labelledby="nearby-alternatives-heading">
+          <div className="result-group-heading">
+            <span className="eyebrow">Flexible options</span>
+            <h3 id="nearby-alternatives-heading">Explore nearby alternatives</h3>
+            <p>These options break at least one area or budget preference. The tradeoff stays visible.</p>
+          </div>
+          <div className="result-list">
+            {alternativePlans.map(({ ranked, index }) => renderPlanCard(ranked, index, true))}
+          </div>
+        </section>
+      )}
     </section>
   )
 }
@@ -3034,9 +3085,22 @@ function PlanSummaryCard({
   )
 }
 
+type ConciergeChatMessage = {
+  id: number
+  role: 'assistant' | 'user'
+  text: string
+}
+
+type ConciergeProposal = {
+  request: ConciergeRequest
+  targetPlanId: string
+}
+
 function AdjustPanel({
   ranked,
   rankedPlans,
+  intake,
+  venuesByPlan,
   message,
   onAdjust,
   onSelect,
@@ -3048,6 +3112,8 @@ function AdjustPanel({
 }: {
   ranked: RankedPlan
   rankedPlans: RankedPlan[]
+  intake: Intake
+  venuesByPlan: Record<string, CuratedVenueMatch | undefined>
   message: string
   onAdjust: (message: string) => void
   onSelect: (planId: string) => void
@@ -3057,44 +3123,179 @@ function AdjustPanel({
   onOpenLate: () => void
   onOpenExit: () => void
 }) {
-  const adjustments: Array<[string, string, string]> = [
-    ['Make cheaper', 'Find a lower-cost plan while keeping real place links.', 'Selected the lowest-cost itinerary and kept Google Maps review links visible.'],
-    ['Make quieter', 'Prioritize conversation-friendly venues and calmer backups.', `Favored quiet backups like ${ranked.plan.backupOptions[0] ?? 'a quieter backup nearby'}.`],
-    ['Make more romantic', 'Tune the plan toward thoughtful without making it too formal.', 'Kept a more intentional finish without making it too formal.'],
-    ['Switch indoor', 'Find a rain-safe or indoor version of the plan.', 'Selected an indoor/rain-safe itinerary where available.'],
-    ['Replace activity', 'Swap the main activity for a nearby backup.', `Swapped the anchor toward ${ranked.plan.backupOptions[1] ?? 'a nearby backup'}.`],
-    ['Add food/drinks', 'Prioritize plans with food, coffee, dessert, or drinks.', 'Prioritized a plan with real food/drink locations and Google Maps links.'],
-    ['Extend date', 'Keep optional next stops ready if the night is going well.', 'Kept optional extension stops visible on the itinerary.'],
-    ['End sooner', 'Shorten the plan while keeping the public meet point.', 'Selected a shorter itinerary and kept the public meet point.'],
-    ['Continue the night', 'Show low-pressure late-night food, dessert, coffee, or safe transport.', 'Showing low-pressure late-night food, dessert, coffee, or safe transport.'],
-    ['Find backup nearby', 'Bring the backup forward if the first choice is crowded.', ranked.crowdBackup],
-  ]
+  const nextMessageId = useRef(2)
+  const [input, setInput] = useState('')
+  const [proposal, setProposal] = useState<ConciergeProposal | null>(null)
+  const [messages, setMessages] = useState<ConciergeChatMessage[]>([
+    {
+      id: 1,
+      role: 'assistant',
+      text: 'Tell me what should change. I can work with budget, noise, indoor plans, timing, romance, or food.',
+    },
+  ])
+  const candidates = useMemo(
+    () => conciergePlanCandidatesFor(intake, rankedPlans),
+    [intake, rankedPlans],
+  )
+  const targetRanked = proposal
+    ? rankedPlans.find((candidate) => candidate.plan.id === proposal.targetPlanId)
+    : undefined
+  const currentCanonical = canonicalPlanFor(ranked, intake, selectedVenue)
+  const targetVenue = targetRanked ? venuesByPlan[targetRanked.plan.id] : undefined
+  const targetCanonical = targetRanked
+    ? canonicalPlanFor(targetRanked, intake, targetVenue)
+    : undefined
 
-  function adjustedPlanId(title: string): string {
-    if (title === 'Make cheaper' || title === 'End sooner') {
-      return [...rankedPlans].sort((a, b) => a.plan.estimatedCostTotal - b.plan.estimatedCostTotal)[0]?.plan.id ?? ranked.plan.id
-    }
-    if (title === 'Switch indoor' || title === 'Make quieter') {
-      return rankedPlans.find((item) => item.plan.safetyProfile.indoor && item.plan.tags.includes('quiet'))?.plan.id ?? ranked.plan.id
-    }
-    if (title === 'Add food/drinks') {
-      return rankedPlans.find((item) => item.plan.places?.some((place) => /food|sushi|coffee|dessert|drink/i.test(place.category)))?.plan.id ?? ranked.plan.id
-    }
-    return ranked.plan.id
+  function appendMessage(role: ConciergeChatMessage['role'], text: string) {
+    const id = nextMessageId.current
+    nextMessageId.current += 1
+    setMessages((current) => [...current, { id, role, text }])
   }
 
-  function applyAdjustment(title: string, appliedCopy: string) {
-    const planId = adjustedPlanId(title)
-    onSelect(planId)
-    onAdjust(`Preview ready - ${title}: ${appliedCopy} Keep adjusted plan to use it, or choose another adjustment.`)
+  function handleRequest(value: string) {
+    const interpretation = interpretConciergeMessage(value)
+    setProposal(null)
+
+    if (interpretation.status === 'empty') {
+      appendMessage('assistant', interpretation.reply)
+      return
+    }
+    if (interpretation.status === 'privacy') {
+      appendMessage('user', 'Private details withheld.')
+      appendMessage('assistant', interpretation.reply)
+      return
+    }
+
+    appendMessage('user', value.trim())
+    if (interpretation.status !== 'proposal') {
+      appendMessage('assistant', interpretation.reply)
+      return
+    }
+
+    const candidate = selectConciergeCandidate(interpretation.request, candidates)
+    if (!candidate) {
+      appendMessage(
+        'assistant',
+        'I could not find an approved plan that makes that change without breaking your area, budget, or safety settings.',
+      )
+      return
+    }
+    if (candidate.planId === ranked.plan.id) {
+      appendMessage('assistant', 'Your current plan already fits that request, so I left it unchanged.')
+      return
+    }
+
+    setProposal({ request: interpretation.request, targetPlanId: candidate.planId })
+    appendMessage('assistant', 'I found an approved option. Review it below. Nothing changes until you approve.')
+  }
+
+  function submitMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    handleRequest(input)
+    setInput('')
+  }
+
+  function applyProposal() {
+    if (!proposal || !targetRanked) return
+    onSelect(targetRanked.plan.id)
+    onAdjust(`Concierge applied: ${proposal.request.label}. ${targetRanked.plan.title} is now the active plan.`)
+    appendMessage('assistant', `Applied: ${proposal.request.label}. Your itinerary now uses ${targetRanked.plan.title}.`)
+    setProposal(null)
+  }
+
+  function cancelProposal() {
+    setProposal(null)
+    appendMessage('assistant', 'No change made. Your current itinerary is still active.')
   }
 
   return (
-    <section className="surface">
+    <section className="surface" data-active-plan-id={ranked.plan.id}>
       <div className="section-heading">
-        <span className="eyebrow">Preview changes</span>
-        <h2>Preview an adjusted plan, then keep it or choose another change.</h2>
+        <span className="eyebrow">LumaDate Concierge</span>
+        <h2>Adjust the plan by asking for one clear change.</h2>
+        <p>Local mock. No hosted AI or messages.</p>
       </div>
+
+      <section className="concierge" aria-label="LumaDate Concierge">
+        <div className="concierge-log" role="log" aria-live="polite" aria-relevant="additions">
+          {messages.map((chatMessage) => (
+            <p className={`concierge-message ${chatMessage.role}`} key={chatMessage.id}>
+              <span>{chatMessage.role === 'assistant' ? 'LumaDate' : 'You'}</span>
+              {chatMessage.text}
+            </p>
+          ))}
+        </div>
+
+        <div className="concierge-suggestions" aria-label="Suggested adjustments">
+          {conciergeSuggestions.map((suggestion) => (
+            <button
+              type="button"
+              className="concierge-suggestion"
+              key={suggestion}
+              onClick={() => handleRequest(suggestion)}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+
+        <form className="concierge-form" onSubmit={submitMessage}>
+          <label htmlFor="concierge-request">What should change?</label>
+          <div>
+            <input
+              id="concierge-request"
+              className="concierge-input"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              maxLength={240}
+              placeholder="Try: make it quieter"
+              autoComplete="off"
+            />
+            <button type="submit" className="primary">Send</button>
+          </div>
+          <small>Do not enter addresses, phone numbers, email addresses, or links.</small>
+        </form>
+
+        {proposal && targetRanked && targetCanonical && (
+          <section className="concierge-proposal" aria-label="Proposed itinerary change">
+            <div className="concierge-proposal-heading">
+              <span className="eyebrow">Approval required</span>
+              <h3>{proposal.request.label}</h3>
+              <p>Compare the active plan with the proposed replacement.</p>
+            </div>
+            <div className="concierge-comparison">
+              <div className="concierge-plan before">
+                <span>Current</span>
+                <strong>{ranked.plan.title}</strong>
+                <small>{currentCanonical.anchorPlace?.name ?? primaryAnchor(ranked.plan, currentCanonical.meetArea)}</small>
+                <small>{formatDuration(ranked.plan.estimatedDurationMinutes)} | {formatCostRange(ranked.plan.estimatedCostTotal)}</small>
+              </div>
+              <span className="concierge-arrow" aria-hidden="true">to</span>
+              <div
+                className="concierge-plan after"
+                data-plan-id={targetRanked.plan.id}
+                data-venue-id={targetVenue?.venue.id}
+              >
+                <span>Proposed</span>
+                <strong>{targetRanked.plan.title}</strong>
+                <small>{targetCanonical.anchorPlace?.name ?? primaryAnchor(targetRanked.plan, targetCanonical.meetArea)}</small>
+                <small>{formatDuration(targetRanked.plan.estimatedDurationMinutes)} | {formatCostRange(targetRanked.plan.estimatedCostTotal)}</small>
+              </div>
+            </div>
+            <div className="concierge-actions">
+              <button type="button" className="primary" onClick={applyProposal}>Apply change</button>
+              <button type="button" className="secondary" onClick={cancelProposal}>Keep current plan</button>
+            </div>
+          </section>
+        )}
+      </section>
+
+      {message && <p className="mock-update" role="status">{message}</p>}
+      {message && (
+        <button type="button" className="primary wide" onClick={onGoItinerary}>
+          Open adjusted itinerary
+        </button>
+      )}
       <section className="adjust-venue-entry" aria-label="Selected venue">
         <div>
           <span className="eyebrow">Venue</span>
@@ -3103,29 +3304,6 @@ function AdjustPanel({
         </div>
         <button type="button" className="secondary" onClick={onReviewVenue}>Review or change venue</button>
       </section>
-      <div className="adjust-grid">
-        {adjustments.map(([title, preview, appliedCopy]) => {
-          const selected = message.startsWith(`Preview ready - ${title}:`)
-          return (
-          <button
-            type="button"
-            className={selected ? 'adjust-card selected' : 'adjust-card'}
-            aria-pressed={selected}
-            key={title}
-            onClick={() => applyAdjustment(title, appliedCopy)}
-          >
-            <strong>{selected ? `Applied: ${title}` : title}</strong>
-            <span>{selected ? appliedCopy : preview}</span>
-          </button>
-          )
-        })}
-      </div>
-      {message && <p className="mock-update" role="status">{message}</p>}
-      {message && (
-        <button type="button" className="primary wide" onClick={onGoItinerary}>
-          Keep adjusted plan
-        </button>
-      )}
       <button type="button" className="secondary wide" onClick={onOpenLate}>
         Open running-late assistant
       </button>
